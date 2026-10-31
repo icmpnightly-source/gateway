@@ -13,9 +13,11 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { version } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'utf8'));
+// The build writes the day it was made into the app's copy of package.json.
+const { version, buildDate = null } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'utf8'));
+const release = (status) => `KongGate ${status.version}${status.buildDate ? ` (${status.buildDate})` : ''}`;
 
-const HELP = `KongGate ${version}
+const HELP = `${release({ version, buildDate })}
 
 Usage: konggate <command> [options]
 
@@ -216,6 +218,7 @@ const commands = {
       uiDir: [path.join(here, '..', 'frontend', 'dist'), path.join(here, 'ui')].find(existsSync),
       devOrigins: [options['dev-origin'], ...(process.env.KONGGATE_DEV_ORIGIN ?? '').split(',')].filter(Boolean),
       version,
+      buildDate,
       quit: () => stopAsked(),
     });
 
@@ -260,7 +263,7 @@ const commands = {
     ]);
     const hosts = gateway.public ? addresses.filter((address) => !address.virtual).map((address) => address.address) : [];
 
-    say(`KongGate ${status.version}`);
+    say(release(status));
     say(`gateway   ${gateway.running ? [...hosts, 'localhost'].map((host) => `http://${host}:${gateway.port}`).join('  ') : `NOT RUNNING: ${gateway.error?.message}`}`);
     say(`secrets   ${database.used ? `database ${database.host}:${database.port}/${database.name} (${database.connected ? 'connected' : `not connected: ${database.error?.message ?? 'still trying'}`})` : 'this computer\'s file'}`);
     say(`data      ${status.dataFile}`);

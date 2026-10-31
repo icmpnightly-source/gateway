@@ -2,9 +2,9 @@ KongGate - desktop app
 ======================
 
 In this folder:
-  KongGate-win32-x64\              the app; run KongGate.exe inside it
-  KongGate-<version>-win-x64.zip   the same folder as one file, to copy to other PCs
-  database\                        optional: a database for the JWT secrets, for one server
+  KongGate-win32-x64\                     the app; run KongGate.exe inside it
+  KongGate-<version>-<date>-win-x64.zip   the same folder as one file, to copy to other PCs
+  database\                               optional: a database for the JWT secrets, for one server
 
 The app is the gateway and its screens in one program. It needs nothing
 installed: no Docker, no Node.js, no internet. Projects and works are kept in
@@ -18,7 +18,7 @@ va hech kim bilan umumiy emas.
 
 RUN IT / ISHGA TUSHIRISH
 ------------------------
-Unzip KongGate-<version>-win-x64.zip anywhere and run KongGate.exe.
+Unzip KongGate-<version>-<date>-win-x64.zip anywhere and run KongGate.exe.
 Zip'ni istalgan joyga oching va KongGate.exe ni ishga tushiring.
 
 
