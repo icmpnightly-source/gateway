@@ -1,9 +1,9 @@
 # Changelog
 
 Each release of the KongGate desktop app, newest first, with the day it was
-released. A release is published by pushing a tag `v<version>`; see
-[Release a new version](README.md#release-a-new-version). The app itself shows
-the day its build was made, under its version.
+released. A release is made on GitHub's Releases page with a tag
+`v<version>`; see [Release a new version](README.md#release-a-new-version).
+The app itself shows the day its build was made, under its version.
 
 ## 2.0.0 — 2026-10-31
 

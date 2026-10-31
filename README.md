@@ -47,7 +47,7 @@ because only the administrator knows those.
 | [frontend](frontend) | The screens (React). Built into static files that the engine serves. |
 | [konggate-desktop](konggate-desktop) | The built app, its zip, and a compose file for the secrets' database. Made by the build. |
 | [CHANGELOG.md](CHANGELOG.md) | Every release: its version, its date, what it changed. |
-| [.github](.github) | The workflow that builds and publishes a release. |
+| [.github](.github) | The workflow that builds the app for a release. |
 
 ## Build the app
 
@@ -75,26 +75,26 @@ version.
 
 ## Release a new version
 
-Releases are built on GitHub's own Windows machines by
-[.github/workflows/desktop.yml](.github/workflows/desktop.yml) and published on
-the repository's Releases page.
+Releases are made on the repository's Releases page; the app in them is
+built on GitHub's own Windows machines by
+[.github/workflows/desktop.yml](.github/workflows/desktop.yml).
 
 1. Raise `version` in [desktop/package.json](desktop/package.json) (`2.0.0` →
    `2.0.1` for fixes, `2.1.0` for something new, `3.0.0` for a change people
    must adapt to), and add a `## <version> — <date>` section at the top of
-   [CHANGELOG.md](CHANGELOG.md) saying what changed. Commit both to `main`.
-2. Tag that commit with the version and push the tag:
+   [CHANGELOG.md](CHANGELOG.md) saying what changed. Get both into `main`.
+2. On GitHub: **Releases → Create a new release**. Under "Choose a tag" type
+   `v` + the version (`v2.0.1`) and pick "Create new tag on publish", with
+   `main` as the target. A title and notes may be left empty. Press
+   **Publish release**.
+3. A few minutes later the release has `KongGate-<version>-<date>-win-x64.zip`
+   attached. What was left empty is filled in: the title
+   "KongGate <version> (<date>)", and the version's CHANGELOG section as the
+   notes. The build is on the Actions tab meanwhile.
 
-   ```bash
-   git tag v2.0.1
-   git push origin v2.0.1
-   ```
-
-3. GitHub tests the engine, builds the app, and publishes
-   `KongGate-<version>-<date>-win-x64.zip` as the release
-   "KongGate <version> (<date>)", with the version's CHANGELOG section as its
-   notes. It refuses a tag that is not `v` + the version in package.json, and
-   a version CHANGELOG.md says nothing about.
+The build refuses a tag that is not `v` + the version in package.json, and a
+version CHANGELOG.md says nothing about; the release then stays without the
+app, to be deleted (with its tag) and made again.
 
 "Run workflow" on the Actions tab, or a pull request that touches the app,
 does the same without publishing anything: the zip is kept with the run for

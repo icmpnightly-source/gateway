@@ -3,15 +3,15 @@
 # - A pull request that touches the app, or "Run workflow" on the Actions tab:
 #   tests the engine and builds the app. The zip is kept with the run for 14
 #   days, to try out before releasing.
-# - A pushed tag v<version> (git tag v2.0.0, then git push origin v2.0.0): the
-#   same, then the zip is published as a GitHub Release named
-#   "KongGate <version> (<build day>)", with that version's notes from
-#   CHANGELOG.md.
+# - A release published on GitHub ("Create a new release" on the Releases
+#   page, with a tag v<version>): the same, then the zip is attached to that
+#   release. A title or notes left empty are filled in: "KongGate <version>
+#   (<build day>)", and that version's section of CHANGELOG.md.
 name: Desktop app
 
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
   pull_request:
     paths: ['desktop/**', 'frontend/**', 'CHANGELOG.md', '.github/**']
   workflow_dispatch:
@@ -37,12 +37,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Check the tag against desktop/package.json and CHANGELOG.md
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Check the release's tag against desktop/package.json and CHANGELOG.md
+        if: github.event_name == 'release'
         run: |
           version=$(node -p "require('./desktop/package.json').version")
           if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::The tag is $GITHUB_REF_NAME but desktop/package.json says $version: the tag must be v$version."
+            echo "::error::The release's tag is $GITHUB_REF_NAME but desktop/package.json says $version. Delete this release and its tag, and make it again with the tag v$version."
             exit 1
           fi
           node .github/scripts/release-notes.mjs "$version" > /dev/null
@@ -91,13 +91,28 @@ jobs:
           compression-level: 0 # already a zip
           retention-days: 14
 
-      - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Attach the app to the release
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
           VERSION: ${{ steps.built.outputs.version }}
           DAY: ${{ steps.built.outputs.day }}
           ZIP: ${{ steps.built.outputs.zip }}
         run: |
-          node .github/scripts/release-notes.mjs "$VERSION" > notes.md
-          gh release create "$GITHUB_REF_NAME" "$ZIP" --title "KongGate $VERSION ($DAY)" --notes-file notes.md --verify-tag
+          gh release upload "$TAG" "$ZIP" --clobber
+          # Fill in only what was left empty: a title or notes someone wrote stay.
+          name=$(gh release view "$TAG" --json name --jq .name)
+          body=$(gh release view "$TAG" --json body --jq .body)
+          changes=()
+          if [ -z "$name" ] || [ "$name" = "$TAG" ]; then
+            changes+=(--title "KongGate $VERSION ($DAY)")
+          fi
+          if [ -z "$body" ]; then
+            node .github/scripts/release-notes.mjs "$VERSION" > notes.md
+            changes+=(--notes-file notes.md)
+          fi
+          if [ ${#changes[@]} -gt 0 ]; then
+            gh release edit "$TAG" "${changes[@]}"
+          fi
