@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KongGate</title>
+    <script>
+      // Apply the stored theme before first paint, otherwise the page flashes
+      // in the wrong mode until React mounts.
+      (function () {
+        try {
+          var root = document.documentElement;
+          var mode = localStorage.getItem('theme-mode');
+          if (mode !== 'light' && mode !== 'dark') {
+            mode = window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+          }
+          root.classList.toggle('dark', mode === 'dark');
+
+          var colors = [
+            'blue-theme',
+            'green-theme',
+            'orange-theme',
+            'rose-theme',
+            'violet-theme',
+            'sky-theme',
+          ];
+          var color = localStorage.getItem('theme-color');
+          root.classList.add(colors.indexOf(color) === -1 ? 'blue-theme' : color);
+        } catch (e) {
+          /* private mode or storage disabled - fall back to the light theme */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

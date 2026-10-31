@@ -1,0 +1,76 @@
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
+import { deleteRule, fetchRules, saveRule } from '@/api/works';
+import { engineErrorMessage } from '@/api/engine';
+import type { GatewayRule, GatewayRulePayload, GatewayState } from '@/types/gateway.types';
+
+// The rules live in the shared database, not in the app: every change is written there
+// and the list is read back, so the page always shows what the gateway runs.
+
+// Rejections carry the engine's message ('' when it gave none).
+type ThunkConfig = { rejectValue: string };
+
+export const loadRules = createAsyncThunk<GatewayRule[], void, ThunkConfig>(
+  'gateway/loadRules',
+  async (_, { rejectWithValue }) => {
+    try {
+      return await fetchRules();
+    } catch (error) {
+      return rejectWithValue(engineErrorMessage(error));
+    }
+  },
+);
+
+/** Resolves with the rule as saved, so the caller can go to a new one. */
+export const saveGatewayRule = createAsyncThunk<
+  GatewayRule,
+  { payload: GatewayRulePayload; projectId: string; existing?: GatewayRule },
+  ThunkConfig
+>('gateway/saveRule', async ({ payload, projectId, existing }, { dispatch, rejectWithValue }) => {
+  let saved: GatewayRule;
+  try {
+    saved = await saveRule(payload, projectId, existing);
+  } catch (error) {
+    return rejectWithValue(engineErrorMessage(error));
+  }
+  await dispatch(loadRules());
+  return saved;
+});
+
+export const removeGatewayRule = createAsyncThunk<void, GatewayRule, ThunkConfig>(
+  'gateway/removeRule',
+  async (rule, { dispatch, rejectWithValue }) => {
+    try {
+      await deleteRule(rule);
+    } catch (error) {
+      return rejectWithValue(engineErrorMessage(error));
+    } finally {
+      // Also after a failure: part of the rule may be gone already.
+      await dispatch(loadRules());
+    }
+  },
+);
+
+const initialState: GatewayState = { items: [], status: 'idle' };
+
+const gatewaySlice = createSlice({
+  name: 'gateway',
+  initialState,
+  reducers: {},
+  extraReducers: (builder) => {
+    builder
+      .addCase(loadRules.pending, (state) => {
+        state.status = 'loading';
+      })
+      .addCase(loadRules.fulfilled, (state, action) => {
+        state.status = 'ready';
+        state.items = action.payload;
+        state.error = undefined;
+      })
+      .addCase(loadRules.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload || undefined;
+      });
+  },
+});
+
+export default gatewaySlice.reducer;

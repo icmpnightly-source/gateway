@@ -1,0 +1,98 @@
+name: kong-gateway
+
+x-kong-env: &kong-env
+  KONG_DATABASE: postgres
+  KONG_PG_HOST: kong-db
+  KONG_PG_USER: kong
+  KONG_PG_PASSWORD: ${KONG_PG_PASSWORD:-kong}
+  KONG_PG_DATABASE: kong
+  KONG_PLUGINS: bundled,jwt-claim-forward,trace-details
+  KONG_LUA_PACKAGE_PATH: /opt/?.lua;;
+
+x-kong-plugins: &kong-plugins
+  - ./gateway/plugins:/opt/kong/plugins:ro
+
+services:
+  kong-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_DB: kong
+      POSTGRES_PASSWORD: ${KONG_PG_PASSWORD:-kong}
+    volumes:
+      - kong-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kong -d kong"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  kong-migrations:
+    image: kong:3.9
+    # "bootstrap" prepares a new database; "up" and "finish" bring an existing
+    # one up to date, e.g. when the plugin gains a table.
+    command: sh -c "kong migrations bootstrap && kong migrations up && kong migrations finish"
+    environment: *kong-env
+    volumes: *kong-plugins
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    restart: on-failure
+
+  kong:
+    image: kong:3.9
+    environment:
+      <<: *kong-env
+      # What an administrator signs in with to manage the JWT secrets.
+      KONGGATE_ADMIN_PASSWORD: ${KONGGATE_ADMIN_PASSWORD:-}
+      # Seconds until a saved rule goes live (Kong's default is 5).
+      KONG_WORKER_STATE_UPDATE_FREQUENCY: 1
+      # Lets rules with tracing on record spans; each rule sets its own
+      # sampling rate, so nothing is exported for the others.
+      KONG_TRACING_INSTRUMENTATIONS: all
+      KONG_TRACING_SAMPLING_RATE: 1.0
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+    volumes: *kong-plugins
+    ports:
+      - "${KONG_PROXY_PORT:-8000}:8000"
+      # The Admin API has no authentication: keep it off the network.
+      - "127.0.0.1:${KONG_ADMIN_PORT:-8001}:8001"
+    extra_hosts:
+      # Lets a destination point at a service running on the host machine.
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      kong-migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # Collects and shows the traces of rules that have tracing on. Kong sends
+  # them to http://jaeger:4318/v1/traces; they are kept in memory only.
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    ports:
+      # Open to this machine only unless JAEGER_BIND says otherwise (see .env).
+      - "${JAEGER_BIND:-127.0.0.1}:${JAEGER_UI_PORT:-16686}:16686"
+    restart: unless-stopped
+
+  # Stand-in destination for trying rules out: http://echo:8080
+  echo:
+    image: node:24-alpine
+    command: node /srv/server.js
+    init: true
+    volumes:
+      - ./gateway/echo/server.js:/srv/server.js:ro
+    restart: unless-stopped
+
+volumes:
+  kong-db-data:

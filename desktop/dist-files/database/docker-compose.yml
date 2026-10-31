@@ -1,0 +1,29 @@
+# The one thing KongGate keeps on a server: its PostgreSQL database.
+# Every PC running the app connects to it (see ../README.txt).
+#
+#   docker compose up -d
+
+name: konggate-db
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: konggate
+      POSTGRES_DB: konggate
+      # From .env, next to this file.
+      POSTGRES_PASSWORD: ${KONGGATE_DB_PASSWORD:?set KONGGATE_DB_PASSWORD in .env}
+    ports:
+      # Open to the network: the apps on the other PCs connect here.
+      - "${KONGGATE_DB_PORT:-5432}:5432"
+    volumes:
+      - konggate-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U konggate -d konggate"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  konggate-db-data:

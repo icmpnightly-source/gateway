@@ -1,0 +1,51 @@
+# Serves the built app and gives it the same two doors to Kong that the dev
+# server does (vite.config.ts). ${KONG_PROXY_PORT} and ${JAEGER_UI_PORT} are
+# filled in from the container's environment when it starts.
+
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+
+    # Docker's own DNS, asked again every few seconds: Kong may come back on
+    # another address after a restart.
+    resolver 127.0.0.11 valid=10s;
+    set $kong kong;
+
+    # Tells the app which ports the gateway and Jaeger are published on.
+    sub_filter '</head>' '<script>window.__KONGGATE__={gatewayPort:"${KONG_PROXY_PORT}",jaegerPort:"${JAEGER_UI_PORT}"}</script></head>';
+
+    # One page handles every address, so anything that isn't a file is the app.
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # Always fetched anew, as it names the current build's files.
+    location = /index.html {
+        add_header Cache-Control no-cache;
+    }
+
+    # Which address the page is being opened from, and this server's own, for
+    # the "my IP" button on a work's destination.
+    location = /whoami {
+        default_type application/json;
+        add_header Cache-Control no-store;
+        return 200 '{"client":"$remote_addr","server":"$server_addr"}';
+    }
+
+    # Kong's Admin API has no authentication of its own, so only the parts the
+    # app itself calls are let through.
+    location ~ ^/kong-admin/(services|routes|plugins|konggate_projects|konggate/login|konggate/secrets)(/|$) {
+        rewrite ^/kong-admin(/.*)$ $1 break;
+        proxy_pass http://$kong:8001;
+    }
+
+    location /kong-admin {
+        return 403;
+    }
+
+    # The gateway itself, for the app's "try it" dialog.
+    location /kong-proxy/ {
+        rewrite ^/kong-proxy(/.*)$ $1 break;
+        proxy_pass http://$kong:8000;
+    }
+}

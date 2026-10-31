@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Bridge the design-system variables into Tailwind's color namespace, so
+ * utilities read as `bg-container` instead of `bg-(--c-color-bg-container)`.
+ * `inline` keeps the var() reference in the generated utility, so the colors
+ * still follow the active theme and dark mode.
+ */
+@theme inline {
+  --color-brand: var(--c-color-primary);
+  --color-layout: var(--c-color-bg-layout);
+  --color-container: var(--c-color-bg-container);
+  --color-elevated: var(--c-color-bg-elevated);
+  --color-body: var(--c-color-text-base);
+  --color-muted: var(--c-color-text-secondary);
+  --color-subtle: var(--c-color-text-description);
+  --color-line: var(--c-color-border);
+  --color-line-soft: var(--c-color-border-secondary);
+  --color-success: var(--c-color-success);
+  --color-warning: var(--c-color-warning);
+  --color-error: var(--c-color-error);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-layout text-sm text-body;
+    margin: 0;
+    font-family: var(--c-font-family);
+  }
+}
+
+@layer utilities {
+  .content-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--c-color-border) transparent;
+  }
+}
