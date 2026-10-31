@@ -60,6 +60,12 @@ jobs:
         working-directory: desktop
         run: npm ci --no-audit --no-fund
 
+      # Electron's package no longer fetches the program itself on install:
+      # this puts electron.exe in node_modules/electron/dist for the build.
+      - name: Download Electron for Windows
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
       - name: Test the engine
         working-directory: desktop
         run: npm test

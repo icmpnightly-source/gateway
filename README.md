@@ -54,6 +54,7 @@ because only the administrator knows those.
 ```bash
 cd desktop
 npm install
+node node_modules/electron/install.js
 node build.mjs
 ```
 
@@ -68,6 +69,9 @@ command line for help once, to check that both come up. If KongGate is running
 from that folder, only the zip is replaced.
 
 The frontend's own dependencies must be installed too (`frontend/node_modules`).
+`node_modules/electron/install.js` downloads Electron itself (`electron.exe`),
+which installing its package no longer does; once is enough per Electron
+version.
 
 ## Release a new version
 
