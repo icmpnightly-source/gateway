@@ -1,0 +1,97 @@
+# Builds the KongGate desktop app for Windows on GitHub's machines.
+#
+# - A pull request that touches the app, or "Run workflow" on the Actions tab:
+#   tests the engine and builds the app. The zip is kept with the run for 14
+#   days, to try out before releasing.
+# - A pushed tag v<version> (git tag v2.0.0, then git push origin v2.0.0): the
+#   same, then the zip is published as a GitHub Release named
+#   "KongGate <version> (<build day>)", with that version's notes from
+#   CHANGELOG.md.
+name: Desktop app
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['desktop/**', 'frontend/**', 'CHANGELOG.md', '.github/**']
+  workflow_dispatch:
+
+# A newer push to the same pull request makes its older build pointless.
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # to publish the release
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check the tag against desktop/package.json and CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(node -p "require('./desktop/package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but desktop/package.json says $version: the tag must be v$version."
+            exit 1
+          fi
+          node .github/scripts/release-notes.mjs "$version" > /dev/null
+
+      - name: Fetch the frontend's packages from the npm registry
+        run: node .github/scripts/public-npm-lock.mjs frontend/package-lock.json
+
+      - name: Install the frontend's packages
+        working-directory: frontend
+        env:
+          CYPRESS_INSTALL_BINARY: '0' # the end-to-end tests' browser is not needed to build
+        run: npm ci --no-audit --no-fund --registry=https://registry.npmjs.org/
+
+      - name: Install the desktop app's packages
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+
+      - name: Test the engine
+        working-directory: desktop
+        run: npm test
+
+      - name: Build the app
+        working-directory: desktop
+        run: node build.mjs
+
+      - name: Name what was built
+        id: built
+        run: |
+          version=$(node -p "require('./desktop/package.json').version")
+          day=$(node -p "require('./konggate-desktop/KongGate-win32-x64/resources/app/package.json').buildDate")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "day=$day" >> "$GITHUB_OUTPUT"
+          echo "zip=konggate-desktop/KongGate-$version-$day-win-x64.zip" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KongGate-${{ steps.built.outputs.version }}-${{ steps.built.outputs.day }}-win-x64
+          path: ${{ steps.built.outputs.zip }}
+          if-no-files-found: error
+          compression-level: 0 # already a zip
+          retention-days: 14
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.built.outputs.version }}
+          DAY: ${{ steps.built.outputs.day }}
+          ZIP: ${{ steps.built.outputs.zip }}
+        run: |
+          node .github/scripts/release-notes.mjs "$VERSION" > notes.md
+          gh release create "$GITHUB_REF_NAME" "$ZIP" --title "KongGate $VERSION ($DAY)" --notes-file notes.md --verify-tag

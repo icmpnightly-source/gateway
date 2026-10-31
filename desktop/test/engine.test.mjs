@@ -10,7 +10,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHmac, generateKeyPairSync, sign as signWith, constants } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -81,14 +81,14 @@ const vault = {
   open: (sealed) => (sealed.startsWith('test:') ? Buffer.from(sealed.slice(5), 'hex').toString('utf8') : null),
 };
 
-async function engineOn(name, gatewayPort, appPort) {
+async function engineOn(name, gatewayPort, appPort, release = {}) {
   const folder = path.join(scratch, name);
   mkdirSync(folder, { recursive: true });
   const settingsFile = path.join(folder, 'settings.json');
   const dataFile = path.join(folder, 'data.json');
   writeFileSync(settingsFile, JSON.stringify({ gateway: { port: gatewayPort, public: false }, app: { port: appPort } }));
 
-  const engine = await startEngine({ settingsFile, dataFile, vault, uiDir: path.join(scratch, 'no-ui'), report: () => undefined });
+  const engine = await startEngine({ settingsFile, dataFile, vault, uiDir: path.join(scratch, 'no-ui'), report: () => undefined, ...release });
   return { engine, app: engine.url, gateway: `http://127.0.0.1:${gatewayPort}`, dataFile };
 }
 
@@ -142,6 +142,7 @@ try {
   console.log('# this computer');
   let r = await api('GET', '/status');
   expect('status: the gateway runs, and the data file is named', [r.status, r.json.gateway.running, r.json.gateway.port, r.json.dataFile], [200, true, 18100, one.dataFile]);
+  expect('an engine nobody built has no build day', r.json.buildDate, null);
   r = await api('GET', '/settings');
   expect('settings: the gateway\'s port and who may call it', r.json.gateway, { port: 18100, public: false });
   expect('what closing the window means starts as a question', r.json.window, { onClose: 'ask' });
@@ -546,13 +547,16 @@ try {
   expect('the data file holds the projects and works', [JSON.parse(onDisk).projects.length, JSON.parse(onDisk).works.length], [1, exported.works.length]);
   expect('with the secrets\' values sealed', [onDisk.includes('new secret'), onDisk.includes(Buffer.from('new secret').toString('base64')), JSON.parse(onDisk).secrets[0].value.startsWith('test:')], [false, false, true]);
   await one.engine.stop();
-  one = await engineOn('one', 18100, 18101);
+  // Back as a built app would start it: with its version and the day it was built.
+  one = await engineOn('one', 18100, 18101, { version: '9.9.9', buildDate: '2026-10-31' });
   // The connections this test kept open to the stopped engine are dead; the
   // first call finds that out and the next ones are made afresh.
   await fetch(`${one.app}/api/status`).catch(() => undefined);
   await fetch(`${one.gateway}/`).catch(() => undefined);
   r = await api('GET', '/projects');
   expect('after a restart the projects are still there', r.json.map((project) => project.name), [`test-${suffix}`]);
+  r = await api('GET', '/status');
+  expect('a built app says its version and the day it was built', [r.json.version, r.json.buildDate], ['9.9.9', '2026-10-31']);
   r = await through('GET', '/verified', { headers: { Authorization: `Bearer ${hsToken(good, 'new secret')}` } });
   expect('and so are the secrets, unsealed for the gateway', r.status, 200);
   r = await api('POST', '/secrets', { name: 'x', algorithm: 'HS256', value: 'v' }, session);
@@ -581,10 +585,22 @@ try {
   const cli = (args, env) => cliIn(folderOne, args, env);
   let c = await cli(['help']);
   expect('help lists the commands', [c.code, c.out.includes('konggate <command>'), c.out.includes('secrets add <name>')], [0, true, true]);
+  const { version } = JSON.parse(readFileSync(path.join(path.dirname(CLI), 'package.json'), 'utf8'));
+  expect('and starts with the version, with no build day in a checkout', c.out.split('\n')[0], `KongGate ${version}`);
+  // The command line as the build packs it: its package.json says when it was built.
+  const packed = path.join(scratch, 'packed');
+  mkdirSync(packed);
+  copyFileSync(CLI, path.join(packed, 'cli.mjs'));
+  writeFileSync(path.join(packed, 'package.json'), JSON.stringify({ version, buildDate: '2026-10-31' }));
+  c = await new Promise((resolve) => {
+    execFile(process.execPath, [path.join(packed, 'cli.mjs'), 'help'], { encoding: 'utf8' }, (error, out) => resolve({ code: error ? 1 : 0, out }));
+  });
+  expect('a built one names the day too', [c.code, c.out.split('\n')[0]], [0, `KongGate ${version} (2026-10-31)`]);
   c = await cliIn(path.join(scratch, 'nobody'), ['status']);
   expect('with no KongGate running there, it says so', [c.code, c.err.includes('KongGate is not running')], [1, true]);
   c = await cli(['status']);
   expect('status: the gateway and where the secrets are', [c.code, c.out.includes('http://localhost:18150'), c.out.includes('this computer\'s file')], [0, true, true]);
+  expect('and which release is running, built on which day', c.out.split('\n')[0], 'KongGate 9.9.9 (2026-10-31)');
   c = await cli(['projects']);
   expect('projects are listed', [c.code, c.out.includes(`test-${suffix}`)], [0, true]);
   c = await cli(['works', `test-${suffix}`]);

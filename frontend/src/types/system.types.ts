@@ -17,6 +17,8 @@ export interface LocalAddress {
 /** How things stand on this computer right now. */
 export interface SystemStatus {
   version: string;
+  /** The day this release was built (`YYYY-MM-DD`); null when it runs from a checkout. */
+  buildDate: string | null;
   /** Whether this is the desktop app, with a window to close, or the gateway on its own. */
   hasWindow: boolean;
   gateway: {

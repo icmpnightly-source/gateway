@@ -176,7 +176,12 @@ export function MainLayout() {
           </button>
         ))}
 
-        {status?.version && <span className="mt-auto text-[10px] text-subtle">v{status.version}</span>}
+        {status?.version && (
+          <span className="mt-auto flex flex-col items-center text-[10px] leading-tight text-subtle">
+            <span>v{status.version}</span>
+            {status.buildDate && <span>{status.buildDate}</span>}
+          </span>
+        )}
       </nav>
 
       {/* Beside the sections, what the open one holds: the projects' tree, or the settings' parts. */}

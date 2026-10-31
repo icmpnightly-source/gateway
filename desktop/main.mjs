@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { startEngine } from './engine/index.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { version } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'utf8'));
+// The build writes the day it was made into the app's copy of package.json.
+const { version, buildDate = null } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'utf8'));
 
 // A run that only proves the packaged app starts: own data folder, no window
 // left open. Set by the build.
@@ -264,6 +265,7 @@ if (!app.requestSingleInstanceLock()) {
         uiDir: UI_DIR,
         vault,
         version,
+        buildDate,
         report,
         // "konggate stop", typed in a terminal.
         quit: () => void quit(),

@@ -24,6 +24,10 @@ const staging = path.join(out, '.build');
 const folder = path.join(staging, NAME);
 const exe = path.join(folder, 'KongGate.exe');
 const { version } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'utf8'));
+// The day of this build, on this computer's calendar: it goes with the version
+// everywhere the version is shown, and into the zip's name.
+const now = new Date();
+const buildDate = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, '0')).join('-');
 
 function run(command, args, options = {}) {
   console.log(`\n> ${command} ${args.join(' ')}`.trimEnd());
@@ -63,6 +67,9 @@ const app = path.join(folder, 'resources', 'app');
 for (const item of ['main.mjs', 'cli.mjs', 'package.json', 'engine', 'ui', 'assets/icon.png', 'assets/tray.png']) {
   cpSync(path.join(here, item), path.join(app, item), { recursive: true });
 }
+// The app's own package.json also says when it was built.
+const packageFile = path.join(app, 'package.json');
+writeFileSync(packageFile, `${JSON.stringify({ ...JSON.parse(readFileSync(packageFile, 'utf8')), buildDate }, null, 2)}\n`);
 // The command line: the same program, started as plain Node on cli.mjs, so
 // that what it prints reaches the terminal it was typed in.
 writeFileSync(
@@ -77,7 +84,7 @@ for (const dependency of runtime) {
   cpSync(dependency, path.join(app, path.relative(here, dependency)), { recursive: true });
 }
 
-// 5. The program file says whose it is: icon, name and version.
+// 5. The program file says whose it is: icon, name, version and build day.
 const program = ResEdit.NtExecutable.from(readFileSync(exe), { ignoreCert: true });
 const resources = ResEdit.NtExecutableResource.from(program);
 const [iconGroup] = ResEdit.Resource.IconGroupEntry.fromEntries(resources.entries);
@@ -98,6 +105,7 @@ versionInfo.setStringValues(versionInfo.getAllLanguagesForStringValues()[0], {
   LegalCopyright: 'KongGate',
   InternalName: 'KongGate',
   OriginalFilename: 'KongGate.exe',
+  ProductVersion: `${version} (${buildDate})`,
 });
 versionInfo.outputToResourceEntries(resources.entries);
 resources.outputResource(program);
@@ -119,7 +127,7 @@ if (smoke.status !== 0 || !seen) {
   process.exit(1);
 }
 const { path: firstPage, status } = JSON.parse(seen);
-console.log(`  started: first page ${firstPage}, version ${status.version}, gateway on port ${status.gateway.port}`);
+console.log(`  started: first page ${firstPage}, version ${status.version} (${status.buildDate}), gateway on port ${status.gateway.port}`);
 
 //    And that its command line answers in the terminal.
 const typed = spawnSync('cmd.exe', ['/d', '/c', path.join(folder, 'konggate.cmd'), 'help'], { encoding: 'utf8', timeout: 60000 });
@@ -131,7 +139,7 @@ console.log('  konggate.cmd help: answered');
 
 // 7. The same folder as one file. Windows' own tar writes zip archives; it is
 //    named in full because another tar, which does not, may come first.
-const zip = path.join(out, `KongGate-${version}-win-x64.zip`);
+const zip = path.join(out, `KongGate-${version}-${buildDate}-win-x64.zip`);
 rmSync(zip, { force: true });
 const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
 run(tar, ['-a', '-c', '-f', zip, '-C', staging, NAME]);

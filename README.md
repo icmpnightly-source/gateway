@@ -46,6 +46,8 @@ because only the administrator knows those.
 | [desktop/main.mjs](desktop/main.mjs) | The Electron shell: a window, a tray icon, and the engine in the same process. |
 | [frontend](frontend) | The screens (React). Built into static files that the engine serves. |
 | [konggate-desktop](konggate-desktop) | The built app, its zip, and a compose file for the secrets' database. Made by the build. |
+| [CHANGELOG.md](CHANGELOG.md) | Every release: its version, its date, what it changed. |
+| [.github](.github) | The workflow that builds and publishes a release. |
 
 ## Build the app
 
@@ -56,12 +58,43 @@ node build.mjs
 ```
 
 writes [konggate-desktop](konggate-desktop): `KongGate-win32-x64/KongGate.exe`
-with `konggate.cmd` beside it, the same folder as a zip, and a `README.txt` for
-whoever gets it. The build starts the packaged program once, and asks its
+with `konggate.cmd` beside it, the same folder as a zip
+(`KongGate-<version>-<date>-win-x64.zip`), and a `README.txt` for whoever gets
+it. The version is the one in [desktop/package.json](desktop/package.json); the
+date is the day of the build, which the app shows under its version (at the
+bottom of the left bar), `konggate help` and `konggate status` print, and the
+.exe's Properties > Details give as its product version. The build starts the packaged program once, and asks its
 command line for help once, to check that both come up. If KongGate is running
 from that folder, only the zip is replaced.
 
 The frontend's own dependencies must be installed too (`frontend/node_modules`).
+
+## Release a new version
+
+Releases are built on GitHub's own Windows machines by
+[.github/workflows/desktop.yml](.github/workflows/desktop.yml) and published on
+the repository's Releases page.
+
+1. Raise `version` in [desktop/package.json](desktop/package.json) (`2.0.0` →
+   `2.0.1` for fixes, `2.1.0` for something new, `3.0.0` for a change people
+   must adapt to), and add a `## <version> — <date>` section at the top of
+   [CHANGELOG.md](CHANGELOG.md) saying what changed. Commit both to `main`.
+2. Tag that commit with the version and push the tag:
+
+   ```bash
+   git tag v2.0.1
+   git push origin v2.0.1
+   ```
+
+3. GitHub tests the engine, builds the app, and publishes
+   `KongGate-<version>-<date>-win-x64.zip` as the release
+   "KongGate <version> (<date>)", with the version's CHANGELOG section as its
+   notes. It refuses a tag that is not `v` + the version in package.json, and
+   a version CHANGELOG.md says nothing about.
+
+"Run workflow" on the Actions tab, or a pull request that touches the app,
+does the same without publishing anything: the zip is kept with the run for
+14 days, to try out first.
 
 ## Develop
 

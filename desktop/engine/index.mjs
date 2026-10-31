@@ -67,6 +67,8 @@ const close = (server) => new Promise((resolve) => {
  * - `devOrigins`: extra origins the API accepts calls from (the dev server's).
  * - `quit`: what ends the program this engine runs in, for when it is asked to stop.
  * - `hasWindow`: whether there is a window whose close button has a meaning to choose.
+ * - `version`, `buildDate`: which release this is, and the day it was built
+ *   (`YYYY-MM-DD`; null in a checkout, which nobody built).
  */
 export async function startEngine({
   settingsFile,
@@ -75,6 +77,7 @@ export async function startEngine({
   vault,
   devOrigins = [],
   version = '',
+  buildDate = null,
   report = console.error,
   quit,
   hasWindow = false,
@@ -265,6 +268,7 @@ export async function startEngine({
 
     status: () => ({
       version,
+      buildDate,
       // Whether this is the desktop app, with a window to close, or the gateway on its own.
       hasWindow,
       gateway: {
