@@ -220,4 +220,3 @@ account can read `data.json`.
   in memory (the last 1000 requests).
 - Builds for macOS or Linux. The engine runs anywhere Node.js does
   (`node cli.mjs serve`); only the packaging is Windows-only.
-"# gateway" 
