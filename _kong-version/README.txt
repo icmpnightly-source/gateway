@@ -9,11 +9,10 @@ rebuilt:
   frontend/           the UI's source as it was (src, index.html, vite config,
                       nginx template, Dockerfile, .dockerignore). To build it
                       again, put these back over ../frontend.
-  build-offline.mjs   the script that produced ../konggate-offline; it belongs
-                      in the project's root, next to docker-compose.yml.
+  gateway/            the Kong plugins and the images' Dockerfiles
+  docker-compose.yml  the development stack
+  build-offline.mjs   the script that produced ../konggate-offline
 
-Still in their old places, untouched by the rewrite:
-
-  ../gateway/              the Kong plugins and the images' Dockerfiles
-  ../docker-compose.yml    the development stack
-  ../konggate-offline/     the last offline bundle that was built
+To run or rebuild this version, copy gateway/, docker-compose.yml and
+build-offline.mjs back to the project's root: they expect to sit there,
+next to ../frontend.
