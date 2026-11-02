@@ -106,9 +106,14 @@ The build refuses a tag that is not `v` + the version in package.json, and a
 version CHANGELOG.md says nothing about; the release then stays without the
 app, to be deleted (with its tag) and made again.
 
-"Run workflow" on the Actions tab, or a pull request that touches the app,
-does the same without publishing anything: the zip is kept with the run for
-14 days, to try out first.
+Or, instead of step 2: on the Actions tab, "Desktop app" → **Run workflow** on
+`main` with **Publish** ticked. The build then makes the release `v<version>`
+itself, with the zip, the title and the notes. It refuses to when that release
+is there already.
+
+"Run workflow" without Publish, or a pull request that touches the app, does
+the same without publishing anything: the zip is kept with the run for 14
+days, to try out first.
 
 ## Develop
 

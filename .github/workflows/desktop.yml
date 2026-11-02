@@ -7,6 +7,9 @@
 #   page, with a tag v<version>): the same, then the zip is attached to that
 #   release. A title or notes left empty are filled in: "KongGate <version>
 #   (<build day>)", and that version's section of CHANGELOG.md.
+# - "Run workflow" on main with "Publish" ticked: the same, and the release
+#   v<version> is made here, from main, with the zip, that title and those
+#   notes. (A release made this way does not start this workflow again.)
 name: Desktop app
 
 on:
@@ -15,6 +18,11 @@ on:
   pull_request:
     paths: ['desktop/**', 'frontend/**', 'CHANGELOG.md', '.github/**']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the build as release v<version> (from main only)'
+        type: boolean
+        default: false
 
 # A newer push to the same pull request makes its older build pointless.
 concurrency:
@@ -46,6 +54,23 @@ jobs:
             exit 1
           fi
           node .github/scripts/release-notes.mjs "$version" > /dev/null
+
+      - name: Check a release can be made from here
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases are made from main, not from $GITHUB_REF_NAME."
+            exit 1
+          fi
+          version=$(node -p "require('./desktop/package.json').version")
+          node .github/scripts/release-notes.mjs "$version" > /dev/null
+          if gh release view "v$version" > /dev/null 2>&1; then
+            echo "::error::Release v$version is there already: raise the version in desktop/package.json and add its CHANGELOG.md section first."
+            exit 1
+          fi
 
       - name: Fetch the frontend's packages from the npm registry
         run: node .github/scripts/public-npm-lock.mjs frontend/package-lock.json
@@ -116,3 +141,15 @@ jobs:
           if [ ${#changes[@]} -gt 0 ]; then
             gh release edit "$TAG" "${changes[@]}"
           fi
+
+      - name: Publish the release
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.built.outputs.version }}
+          DAY: ${{ steps.built.outputs.day }}
+          ZIP: ${{ steps.built.outputs.zip }}
+        run: |
+          node .github/scripts/release-notes.mjs "$VERSION" > notes.md
+          gh release create "v$VERSION" "$ZIP" --target "$GITHUB_SHA" --title "KongGate $VERSION ($DAY)" --notes-file notes.md
