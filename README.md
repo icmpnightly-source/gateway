@@ -38,12 +38,13 @@ Where things are kept:
 
 Everything the screens do can also be done from a terminal (`konggate`).
 
-How it got here: it began as Kong in Docker with a web UI
-([_kong-version](_kong-version)), became a desktop app with its own gateway and
-everything in a shared PostgreSQL ([_database-version](_database-version)),
-then moved the projects into a local file because one shared database mixed
-everybody's projects together, and kept the database for the secrets only,
-because only the administrator knows those.
+How it got here: it began as Kong in Docker with a web UI, became a desktop
+app with its own gateway and everything in a shared PostgreSQL, then moved the
+projects into a local file because one shared database mixed everybody's
+projects together, and kept the database for the secrets only, because only
+the administrator knows those. This repository holds the desktop app alone;
+the earlier versions' sources are in its history (commit `47acbf5` is the
+last that has them, in `_kong-version` and `_database-version`).
 
 ## What is where
 

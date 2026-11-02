@@ -1,4 +1,0 @@
-# The image is made of the built app and its web server config, nothing else.
-*
-!dist
-!nginx.conf.template
