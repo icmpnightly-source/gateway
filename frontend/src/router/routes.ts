@@ -21,7 +21,7 @@ export const workPath = (projectId: string, work: string, view: WorkView = 'sett
 
 /** The settings page shows one section at a time; which one is part of the address. */
 export const SETTINGS_PARAM = 'section';
-export const SETTINGS_SECTIONS = ['gateway', 'appearance', 'window', 'database', 'data', 'admin'] as const;
+export const SETTINGS_SECTIONS = ['gateway', 'plugins', 'appearance', 'window', 'database', 'data', 'admin'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 export const settingsPath = (section: SettingsSection) => `${ROUTES.SETTINGS}?${SETTINGS_PARAM}=${section}`;
 

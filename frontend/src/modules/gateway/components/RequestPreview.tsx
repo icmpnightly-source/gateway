@@ -3,6 +3,7 @@ import { ArrowDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppSelector, useGatewayUrl } from '@/store';
 import type { GatewayRulePayload } from '@/types/gateway.types';
+import { enabledPlugin, pluginTitle, tokenOf } from '../utils/plugins';
 import { joinPath, upstreamUrl } from '../utils/request';
 
 const { Text } = Typography;
@@ -50,8 +51,10 @@ interface RequestPreviewProps {
 export function RequestPreview({ rule }: RequestPreviewProps) {
   const { t } = useTranslation();
   const secrets = useAppSelector((state) => state.secrets.items);
+  const definitions = useAppSelector((state) => state.plugins.info?.plugins ?? []);
   const gatewayUrl = useGatewayUrl();
-  const { token, requestId, rateLimit } = rule;
+  const token = tokenOf(rule);
+  const settingsOf = (name: string) => enabledPlugin(rule, name)?.config as Record<string, never> | undefined;
 
   // A cleared input leaves its field empty or unset, never just a valid value.
   const method = rule.methods?.[0] ?? 'GET';
@@ -62,12 +65,21 @@ export function RequestPreview({ rule }: RequestPreviewProps) {
   const tokenLine =
     tokenHeader.toLowerCase() === 'authorization' ? 'Authorization: Bearer <JWT>' : `${tokenHeader}: <JWT>`;
 
-  const incoming: Line[] = [{ text: `${method} ${gatewayUrl}${joinPath(path, REST)}` }, { text: tokenLine }];
+  const incoming: Line[] = [{ text: `${method} ${gatewayUrl}${joinPath(path, REST)}` }];
+  if (token.enabled) incoming.push({ text: tokenLine });
+  const keyAuth = settingsOf('key-auth');
+  if (keyAuth?.header) incoming.push({ text: `${keyAuth.header}: <API key>` });
+  const basicAuth = settingsOf('basic-auth');
+  if (basicAuth) incoming.push({ text: 'Authorization: Basic <user:password>' });
 
   const outgoing: Line[] = [
     { text: `${method} ${upstreamUrl({ destination, path, stripPath: rule.stripPath }, REST)}` },
   ];
-  if (!token.enabled || token.forwardToken) outgoing.push({ text: tokenLine });
+  if (token.enabled && token.forwardToken) outgoing.push({ text: tokenLine });
+  if (keyAuth?.header && !keyAuth.hideCredentials) outgoing.push({ text: `${keyAuth.header}: <API key>` });
+  if (keyAuth?.consumerHeader) outgoing.push({ text: `${keyAuth.consumerHeader}: <key name>`, added: true });
+  if (basicAuth && !basicAuth.hideCredentials) outgoing.push({ text: 'Authorization: Basic <user:password>' });
+  if (basicAuth?.consumerHeader) outgoing.push({ text: `${basicAuth.consumerHeader}: <user>`, added: true });
 
   if (token.enabled) {
     for (const mapping of token.claims) {
@@ -79,15 +91,18 @@ export function RequestPreview({ rule }: RequestPreviewProps) {
       outgoing.push({ text: `${token.payloadHeader}: <payload, base64>`, added: true });
     }
   }
-  for (const header of rule.headers) {
+  type Pairs = { name: string; value: string }[];
+  const changes = settingsOf('request-transformer') as { setHeaders?: Pairs; addHeaders?: Pairs } | undefined;
+  for (const header of [...(changes?.setHeaders ?? []), ...(changes?.addHeaders ?? [])]) {
     if (header?.name && header.value) outgoing.push({ text: `${header.name}: ${header.value}`, added: true });
   }
-  if (requestId.enabled && requestId.header) outgoing.push({ text: `${requestId.header}: <uuid>`, added: true });
+  const requestId = settingsOf('request-id') as { header?: string } | undefined;
+  if (requestId?.header) outgoing.push({ text: `${requestId.header}: <uuid>`, added: true });
 
   const notes: Note[] = [];
-  if (!token.enabled) {
-    notes.push({ text: t('gateway.previewPassThrough') });
-  } else {
+  if (!(rule.plugins ?? []).some((plugin) => plugin?.enabled)) {
+    notes.push({ text: t('plugins.previewNone') });
+  } else if (token.enabled) {
     const secret = secrets.find((candidate) => candidate.id === token.verify.secretId);
     if (!token.verify.enabled) notes.push({ text: t('gateway.previewUnverified'), tone: 'warning' });
     else if (secret) notes.push({ text: t('gateway.previewVerified', { name: secret.name }), tone: 'success' });
@@ -102,8 +117,14 @@ export function RequestPreview({ rule }: RequestPreviewProps) {
     }
   }
   if (rule.timeoutSeconds) notes.push({ text: t('gateway.previewTimeout', { n: rule.timeoutSeconds }) });
-  if (rateLimit.enabled && rateLimit.perMinute) {
-    notes.push({ text: t('gateway.previewRateLimit', { n: rateLimit.perMinute }) });
+  const rateLimit = settingsOf('rate-limit') as { perMinute?: number } | undefined;
+  if (rateLimit?.perMinute) notes.push({ text: t('gateway.previewRateLimit', { n: rateLimit.perMinute }) });
+  // What the other plugins do, by their names, in the order they run.
+  const described = new Set(['jwt', 'rate-limit', 'request-id', 'request-transformer']);
+  for (const plugin of rule.plugins ?? []) {
+    if (!plugin?.enabled || described.has(plugin.name)) continue;
+    const definition = definitions.find((candidate) => candidate.name === plugin.name);
+    notes.push({ text: pluginTitle(t, plugin.name, definition), tone: definition ? undefined : 'error' });
   }
 
   return (

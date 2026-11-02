@@ -9,6 +9,7 @@ import type { SecretsRejection } from '@/store/slices/secretsSlice';
 import { Role } from '@/types/auth.types';
 import type { GatewaySecret, SecretPayload } from '@/types/gateway.types';
 import { SecretFormModal } from '../components/SecretFormModal';
+import { tokenOf } from '../utils/plugins';
 import { isHmac } from '../utils/token';
 
 const { Title, Text } = Typography;
@@ -70,8 +71,10 @@ export function SecretsPage() {
   };
 
   const usesOf = (secret: GatewaySecret) =>
-    rules.filter((rule) => rule.token.enabled && rule.token.verify.enabled && rule.token.verify.secretId === secret.id)
-      .length;
+    rules.filter((rule) => {
+      const token = tokenOf(rule);
+      return token.enabled && token.verify.enabled && token.verify.secretId === secret.id;
+    }).length;
 
   // All in digits: browsers don't all know the month names of every language here.
   const formatDate = (iso: string) =>

@@ -2,6 +2,7 @@ import { configureStore } from '@reduxjs/toolkit';
 import { useDispatch, useSelector } from 'react-redux';
 import authReducer from './slices/authSlice';
 import gatewayReducer from './slices/gatewaySlice';
+import pluginsReducer from './slices/pluginsSlice';
 import projectsReducer from './slices/projectsSlice';
 import secretsReducer from './slices/secretsSlice';
 import systemReducer from './slices/systemSlice';
@@ -10,6 +11,7 @@ export const store = configureStore({
   reducer: {
     auth: authReducer,
     gateway: gatewayReducer,
+    plugins: pluginsReducer,
     projects: projectsReducer,
     secrets: secretsReducer,
     system: systemReducer,

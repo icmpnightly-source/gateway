@@ -7,18 +7,16 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { ALGORITHMS, decodeBase64Url, isHmac } from './jwt.mjs';
 import { pathMatches, upstreamPathOf } from './gateway.mjs';
+import { describePlugin, jwtOf, withPlugins } from './plugins/index.mjs';
 import { describeConnectionError } from './secrets-db.mjs';
 import { sendRequest } from './sender.mjs';
 import { Refusal } from './store.mjs';
+import { workFrom } from './works.mjs';
 
 const MAX_BODY = 1024 * 1024;
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
-const NAME = /^[\p{L}\p{N}._~-]+$/u;
-const PATH = /^\/(?!.*\/\/)[^\s?#]*$/;
-const HEADER = /^[A-Za-z0-9_-]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CONTROL = /[\u0000-\u001f\u007f]/;
 const TOKEN_FIELD_TYPES = ['string', 'number', 'boolean', 'array', 'object', 'null'];
 
 const CONTENT_TYPES = {
@@ -35,7 +33,7 @@ const CONTENT_TYPES = {
   '.map': 'application/json; charset=utf-8',
 };
 
-// --- what a work may hold ------------------------------------------------------
+// --- what a project file may hold -------------------------------------------------
 
 const refuse = (message) => {
   throw new Refusal(400, message);
@@ -43,128 +41,6 @@ const refuse = (message) => {
 
 const text = (value) => (typeof value === 'string' ? value.trim() : '');
 const list = (value) => (Array.isArray(value) ? value : []);
-const flag = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
-
-function whole(value, { min, max, fallback }) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, Math.round(number)));
-}
-
-function headerName(value, what, { optional = false } = {}) {
-  const name = text(value);
-  if (name === '' && optional) return '';
-  if (!HEADER.test(name)) refuse(`${what}: "${name}" is not a header name`);
-  return name;
-}
-
-/**
- * A work as it is stored, from whatever was sent: every field present and of
- * its kind, so the gateway never has to doubt what it reads.
- */
-export function workFrom(input) {
-  const name = text(input?.name);
-  if (!NAME.test(name)) refuse('the name may hold letters, digits, dots, dashes and underscores');
-
-  const workPath = text(input?.path);
-  if (!PATH.test(workPath)) refuse('the path has to start with "/" and hold no spaces, "?" or "#"');
-
-  const methods = [...new Set(list(input?.methods))];
-  if (methods.some((method) => !METHODS.includes(method))) refuse('unknown method');
-
-  const destination = text(input?.destination);
-  let url;
-  try {
-    url = new URL(destination);
-  } catch {
-    refuse('the destination is not a full address');
-  }
-  if (!['http:', 'https:'].includes(url.protocol) || url.search || url.hash) {
-    refuse('the destination has to be an http:// or https:// address without "?" or "#"');
-  }
-
-  const token = input?.token ?? {};
-  const verify = token.verify ?? {};
-  const secretId = text(verify.secretId);
-  if (secretId && !UUID.test(secretId)) refuse('unknown secret');
-  if (flag(token.enabled, true) && flag(verify.enabled, false) && !secretId) {
-    refuse('choose the secret tokens are verified against');
-  }
-
-  const rateLimit = input?.rateLimit ?? {};
-  const limitBy = rateLimit.by === 'header' ? 'header' : 'ip';
-  const limitHeader = headerName(rateLimit.header, 'request limit', { optional: true });
-  if (flag(rateLimit.enabled, false) && limitBy === 'header' && !limitHeader) {
-    refuse('name the header requests are counted by');
-  }
-
-  const requestId = input?.requestId ?? {};
-  const tracing = input?.tracing ?? {};
-  const cors = input?.cors ?? {};
-  const origins = list(cors.origins).map(text).filter(Boolean);
-
-  const config = {
-    path: workPath,
-    methods,
-    destination,
-    stripPath: flag(input?.stripPath, true),
-    timeoutSeconds: whole(input?.timeoutSeconds, { min: 1, max: 600, fallback: 30 }),
-    headers: list(input?.headers).map((header) => {
-      const value = typeof header?.value === 'string' ? header.value : '';
-      if (value.trim() === '' || CONTROL.test(value)) refuse('a fixed header needs a value, on one line');
-      return { name: headerName(header?.name, 'fixed header'), value };
-    }),
-    token: {
-      enabled: flag(token.enabled, true),
-      header: headerName(token.header || 'Authorization', 'token header'),
-      claims: list(token.claims).map((mapping) => {
-        const claim = text(mapping?.claim);
-        if (!claim) refuse('a token field to forward has no name');
-        return { claim, header: headerName(mapping?.header, `header for "${claim}"`), required: flag(mapping?.required, false) };
-      }),
-      payloadHeader: headerName(token.payloadHeader, 'payload header', { optional: true }),
-      forwardToken: flag(token.forwardToken, true),
-      strict: flag(token.strict, true),
-      conditions: list(token.conditions).map((condition) => {
-        const claim = text(condition?.claim);
-        const values = list(condition?.values).map((value) => String(value)).filter((value) => value !== '');
-        if (!claim || values.length === 0) refuse('a condition needs a token field and at least one value');
-        return { claim, values };
-      }),
-      verify: {
-        enabled: flag(verify.enabled, false),
-        secretId,
-        checkExpiry: flag(verify.checkExpiry, true),
-        leeway: whole(verify.leeway, { min: 0, max: 86400, fallback: 0 }),
-        issuer: text(verify.issuer),
-        audience: text(verify.audience),
-      },
-    },
-    requestId: {
-      enabled: flag(requestId.enabled, false),
-      header: headerName(requestId.header || 'X-Request-Id', 'request id header'),
-      echo: flag(requestId.echo, true),
-    },
-    tracing: {
-      enabled: flag(tracing.enabled, false),
-      samplingPercent: whole(tracing.samplingPercent, { min: 0, max: 100, fallback: 100 }),
-      body: flag(tracing.body, false),
-    },
-    rateLimit: {
-      enabled: flag(rateLimit.enabled, false),
-      perMinute: whole(rateLimit.perMinute, { min: 1, max: 1000000, fallback: 60 }),
-      by: limitBy,
-      header: limitHeader,
-    },
-    cors: {
-      enabled: flag(cors.enabled, false),
-      origins: origins.length > 0 ? origins : ['*'],
-      credentials: flag(cors.credentials, false),
-    },
-  };
-
-  return { name, config };
-}
 
 const tokenFieldsFrom = (input) =>
   list(input)
@@ -180,10 +56,11 @@ const clash = (a, b) =>
  * A project file, as export writes it, checked and turned into what the store
  * adds. A secret is named in the file, never carried in it: the name is
  * matched with a secret that is known here (`secretIds`, by name), or becomes
- * one whose value is yet to be entered.
+ * one whose value is yet to be entered. Format 1 files, from before plugins,
+ * have their works turned into plugins.
  */
-function projectFromFile(file, secretIds) {
-  if (file?.konggate !== 1 || typeof file.project !== 'object' || file.project === null) {
+function projectFromFile(file, secretIds, registry) {
+  if (![1, 2].includes(file?.konggate) || typeof file.project !== 'object' || file.project === null) {
     refuse('this is not a KongGate project file');
   }
 
@@ -204,13 +81,22 @@ function projectFromFile(file, secretIds) {
     return placeholders.get(secretName).id;
   };
 
-  const works = list(file.works).map((work) => {
-    const verify = work?.token?.verify ?? {};
-    const secretName = text(verify.secret);
-    // A work that verified against a secret nobody can name any more still
-    // verifies: against nothing, so it lets no token through until one is chosen.
-    const secretId = secretName ? secretIdFor(secretName) : verify.enabled ? randomUUID() : '';
-    return workFrom({ ...work, token: { ...work?.token, verify: { ...verify, secretId } } });
+  const missingPlugins = new Set();
+  const works = list(file.works).map((given) => {
+    const work = withPlugins(given);
+    const plugins = list(work.plugins).map((plugin) => {
+      if (typeof plugin?.name === 'string' && !registry.get(plugin.name)) missingPlugins.add(plugin.name);
+      if (plugin?.name !== 'jwt') return plugin;
+
+      const verify = plugin.config?.verify ?? {};
+      const secretName = text(verify.secret);
+      // A work that verified against a secret nobody can name any more still
+      // verifies: against nothing, so it lets no token through until one is chosen.
+      const secretId = secretName ? secretIdFor(secretName) : verify.enabled ? randomUUID() : '';
+      const { secret: _secret, ...rest } = verify;
+      return { ...plugin, config: { ...plugin.config, verify: { ...rest, secretId } } };
+    });
+    return workFrom({ ...work, plugins }, registry);
   });
   if (new Set(works.map((work) => work.name)).size !== works.length) refuse('two works in the file share a name');
 
@@ -219,6 +105,7 @@ function projectFromFile(file, secretIds) {
     tokenFields: tokenFieldsFrom(file.project.tokenFields),
     works,
     placeholders: [...placeholders.values()],
+    missingPlugins: [...missingPlugins],
   };
 }
 
@@ -487,7 +374,7 @@ export function createApi(engine) {
       const file = await readJson(req);
       const secretsStore = engine.secretsStore();
       const secretIds = new Map((await secretsStore.secrets()).map((secret) => [secret.name, secret.id]));
-      const incoming = projectFromFile(file, secretIds);
+      const incoming = projectFromFile(file, secretIds, engine.plugins.registry);
 
       // The secrets first: if they cannot be added, nothing of the project is.
       if (incoming.placeholders.length > 0) {
@@ -496,7 +383,8 @@ export function createApi(engine) {
         for (const placeholder of incoming.placeholders) {
           const actual = taken.get(placeholder.name);
           for (const { config } of incoming.works) {
-            if (config.token.verify.secretId === placeholder.id) config.token.verify.secretId = actual;
+            const plugin = jwtOf(config);
+            if (plugin?.config.verify.secretId === placeholder.id) plugin.config.verify.secretId = actual;
           }
         }
       }
@@ -515,6 +403,8 @@ export function createApi(engine) {
         works: incoming.works.length,
         // Secrets the works name that were not here: an administrator has to enter their values.
         missingSecrets: incoming.placeholders.map((secret) => ({ name: secret.name, algorithm: secret.algorithm })),
+        // Plugins the works use that this computer does not have: those works answer nothing until they are added.
+        missingPlugins: incoming.missingPlugins,
         // Works that answer a path one of this computer's works already answers.
         clashes: incoming.works.flatMap(({ name: workName, config }) =>
           existing
@@ -548,13 +438,13 @@ export function createApi(engine) {
     if (is('POST', 'works')) {
       const body = await readJson(req);
       if (!UUID.test(text(body.projectId))) refuse('the work has to be in a project');
-      const { name, config } = workFrom(body);
+      const { name, config } = workFrom(body, engine.plugins.registry);
       const work = await db.createWork(body.projectId, name, config);
       await engine.reload();
       return send(res, 201, work);
     }
     if (is('PUT', 'works', { withId: true })) {
-      const { name, config } = workFrom(await readJson(req));
+      const { name, config } = workFrom(await readJson(req), engine.plugins.registry);
       const work = await db.updateWork(id, name, config);
       await engine.reload();
       return send(res, 200, work);
@@ -569,6 +459,25 @@ export function createApi(engine) {
     if (is('DELETE', 'works', { withId: true })) {
       await db.deleteWork(id);
       await engine.reload();
+      return send(res, 204);
+    }
+
+    // --- the plugins this computer has ---
+
+    const pluginsShown = () => ({
+      folder: engine.plugins.registry.dir ?? null,
+      canOpenFolder: Boolean(engine.plugins.openFolder),
+      plugins: engine.plugins.registry.list().map(describePlugin),
+      errors: engine.plugins.registry.errors(),
+    });
+    if (is('GET', 'plugins')) return send(res, 200, pluginsShown());
+    if (method === 'POST' && resource === 'plugins' && id === 'reload' && !action) {
+      await engine.plugins.reload();
+      return send(res, 200, pluginsShown());
+    }
+    if (method === 'POST' && resource === 'plugins' && id === 'open' && !action) {
+      if (!engine.plugins.openFolder) throw new Refusal(501, 'this KongGate has no window to open the folder in');
+      await engine.plugins.openFolder();
       return send(res, 204);
     }
 

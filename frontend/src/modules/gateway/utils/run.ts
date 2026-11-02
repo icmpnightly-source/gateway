@@ -1,5 +1,6 @@
 import { HTTP_METHODS } from '@/types/gateway.types';
 import type { GatewayRule, HttpMethod, SendVia, SentHeader } from '@/types/gateway.types';
+import { tokenOf } from './plugins';
 import { samplePayload } from './token';
 
 /** One line of a list of names and values: a parameter, a header, a form field. */
@@ -45,11 +46,14 @@ export const methodsOf = (rule: GatewayRule): readonly HttpMethod[] =>
  * Whether a token can be made up for the work. One that verifies only takes a
  * signed token, and the key to sign with is nobody's to get at.
  */
-export const canMakeSample = (rule: GatewayRule) => rule.token.enabled && !rule.token.verify.enabled;
+export const canMakeSample = (rule: GatewayRule) => {
+  const token = tokenOf(rule);
+  return token.enabled && !token.verify.enabled;
+};
 
 /** The token to start from: none where tokens are not read, a made-up one where that will do. */
 export function defaultTokenMode(rule: GatewayRule): TokenMode {
-  if (!rule.token.enabled) return 'none';
+  if (!tokenOf(rule).enabled) return 'none';
   return canMakeSample(rule) ? 'sample' : 'custom';
 }
 
@@ -64,7 +68,7 @@ function freshDraft(rule: GatewayRule): RunDraft {
     bodyText: '',
     form: [],
     tokenMode: defaultTokenMode(rule),
-    payloadText: JSON.stringify(samplePayload(rule.token), null, 2),
+    payloadText: JSON.stringify(samplePayload(tokenOf(rule)), null, 2),
   };
 }
 

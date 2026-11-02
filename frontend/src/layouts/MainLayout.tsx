@@ -255,6 +255,15 @@ export function MainLayout() {
           <div className="flex flex-col gap-(--c-spacing-sm)">
             <span>{t('projects.importedText', { name: imported.project.name, n: imported.works })}</span>
 
+            {(imported.missingPlugins ?? []).length > 0 && (
+              <Alert
+                type="error"
+                showIcon
+                title={t('projects.importedPlugins')}
+                description={imported.missingPlugins.join(', ')}
+              />
+            )}
+
             {imported.missingSecrets.length > 0 && (
               <Alert
                 type="warning"

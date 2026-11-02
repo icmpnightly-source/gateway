@@ -45,6 +45,8 @@ Usage: konggate <command> [options]
                                    keep the secrets in a shared PostgreSQL database
   database off                     keep the secrets in this computer's file again
   log [--failed] [--limit 20]      the latest recorded requests
+  plugins                          list the plugins: built-in, and custom ones from the plugins folder
+  plugins reload                   read the plugins folder again
 
 Anywhere:
   --data <folder>   the app's folder (default: ${defaultDataFolder()})
@@ -293,15 +295,19 @@ const commands = {
     if (works.length === 0) return say('No works.');
 
     const projectName = (id) => projects.find((candidate) => candidate.id === id)?.name ?? '';
-    const tokenOf = ({ token }) =>
-      !token.enabled
-        ? 'as it is'
-        : token.verify.enabled
-          ? `verified: ${secrets.find((secret) => secret.id === token.verify.secretId)?.name ?? '?'}`
-          : 'read, not verified';
+    // Each plugin switched on, in order; the token's, with what verifies it.
+    const pluginsOf = ({ plugins }) =>
+      plugins
+        .filter((plugin) => plugin.enabled)
+        .map((plugin) => {
+          if (plugin.name !== 'jwt') return plugin.name;
+          const { verify } = plugin.config;
+          return verify.enabled ? `jwt (verified: ${secrets.find((secret) => secret.id === verify.secretId)?.name ?? '?'})` : 'jwt (read, not verified)';
+        })
+        .join(', ') || '-';
     table(
-      ['PROJECT', 'WORK', 'METHODS', 'PATH', 'DESTINATION', 'TOKEN'],
-      works.map((work) => [projectName(work.projectId), work.name, work.methods.join(',') || 'any', work.path, work.destination, tokenOf(work)]),
+      ['PROJECT', 'WORK', 'METHODS', 'PATH', 'DESTINATION', 'PLUGINS'],
+      works.map((work) => [projectName(work.projectId), work.name, work.methods.join(',') || 'any', work.path, work.destination, pluginsOf(work)]),
     );
   },
 
@@ -449,6 +455,20 @@ const commands = {
     }
 
     return fail(`database ${action}? There is: database, database set --host <address>, database off`);
+  },
+
+  async plugins(action) {
+    if (action !== undefined && action !== 'reload') return fail(`plugins ${action}? There is: plugins, plugins reload`);
+    const found = action === 'reload' ? await call('POST', '/plugins/reload') : await call('GET', '/plugins');
+    if (options.json) return say(JSON.stringify(found, null, 2));
+
+    table(
+      ['PLUGIN', 'TITLE', 'FROM'],
+      found.plugins.map((plugin) => [plugin.name, plugin.title, plugin.builtIn ? 'built in' : plugin.file]),
+    );
+    say(`\nCustom plugins are read from ${found.folder}`);
+    for (const error of found.errors) say(`NOT USED  ${error.file}: ${error.message}`);
+    return undefined;
   },
 
   async log() {

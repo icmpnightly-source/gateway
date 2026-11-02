@@ -29,11 +29,6 @@ export interface ClaimCondition {
   values: string[];
 }
 
-export interface StaticHeader {
-  name: string;
-  value: string;
-}
-
 export interface TokenVerification {
   enabled: boolean;
   /**
@@ -51,6 +46,7 @@ export interface TokenVerification {
   audience: string;
 }
 
+/** The JWT plugin's settings, with whether the plugin is switched on in the work. */
 export interface TokenSettings {
   /** Off forwards the request untouched: the token is not even looked at. */
   enabled: boolean;
@@ -67,14 +63,6 @@ export interface TokenSettings {
   verify: TokenVerification;
 }
 
-export interface RequestIdSettings {
-  enabled: boolean;
-  /** Header the id travels in; an id the client already sent is kept. */
-  header: string;
-  /** Also return the id to the client. */
-  echo: boolean;
-}
-
 /**
  * Recording a work's requests in the app's own log: what each looked like
  * when it came in and when it left for the destination. Values of the token's
@@ -88,19 +76,84 @@ export interface TracingSettings {
   body: boolean;
 }
 
-export interface RateLimitSettings {
-  enabled: boolean;
-  perMinute: number;
-  /** Count per client address, or per value of a request header. */
-  by: 'ip' | 'header';
-  header: string;
-}
+/** The JWT plugin's settings as the work keeps them. */
+export type JwtConfig = Omit<TokenSettings, 'enabled'>;
 
-export interface CorsSettings {
-  enabled: boolean;
+export interface CorsConfig {
   /** Origins allowed to call the rule from a browser; "*" for any. */
   origins: string[];
   credentials: boolean;
+}
+
+/** A plugin a work uses: its name, whether it is switched on, and its settings. */
+export interface PluginInstance {
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+}
+
+export const PLUGIN_FIELD_TYPES = ['string', 'number', 'boolean', 'select', 'list', 'pairs', 'keys', 'users'] as const;
+
+/** One setting of a plugin, as the plugin describes it: what the form shows for it. */
+export interface PluginField {
+  key: string;
+  type: (typeof PLUGIN_FIELD_TYPES)[number];
+  /** In English: built-in plugins' fields have texts of their own in the app. */
+  label: string;
+  help: string;
+  required: boolean;
+  /** Header names only. */
+  header: boolean;
+  options?: string[];
+  min?: number;
+  max?: number;
+  placeholder?: string;
+  default: unknown;
+  /** Shown only while the other fields named hold one of these values. */
+  when?: Record<string, string[]>;
+}
+
+/** A plugin this computer has: built in, or a file in the plugins folder. */
+export interface PluginDefinition {
+  name: string;
+  title: string;
+  description: string;
+  /** Where it goes in a work's list when added: higher runs earlier. */
+  priority: number;
+  builtIn: boolean;
+  /** The file in the plugins folder, for a custom one. */
+  file?: string;
+  phases: ('rewrite' | 'access' | 'response')[];
+  onPreflight: boolean;
+  fields: PluginField[];
+  /** Its settings when just added. */
+  defaults: Record<string, unknown>;
+}
+
+/** What the plugins folder held when last read. */
+export interface PluginsInfo {
+  folder: string | null;
+  canOpenFolder: boolean;
+  plugins: PluginDefinition[];
+  /** Files that could not be used, and why. */
+  errors: { file: string; message: string }[];
+}
+
+/** An API key of the key-auth plugin: a new one carries the key, a kept one only its hash. */
+export interface ApiKeyRow {
+  name: string;
+  key?: string;
+  hash?: string;
+  /** The key's last characters, to tell it by. */
+  hint?: string;
+}
+
+/** A user of the basic-auth plugin: a new password, or the hash of the one kept. */
+export interface BasicUserRow {
+  username: string;
+  password?: string;
+  salt?: string;
+  hash?: string;
 }
 
 export interface GatewayRule {
@@ -119,13 +172,9 @@ export interface GatewayRule {
   stripPath: boolean;
   /** How long the gateway waits for the destination before answering 504. */
   timeoutSeconds: number;
-  /** Headers the destination always receives, whatever the client sent. */
-  headers: StaticHeader[];
-  token: TokenSettings;
-  requestId: RequestIdSettings;
   tracing: TracingSettings;
-  rateLimit: RateLimitSettings;
-  cors: CorsSettings;
+  /** What the gateway does with a request, in the order it is done. */
+  plugins: PluginInstance[];
   /** ISO date string. */
   createdAt: string;
 }
@@ -168,6 +217,8 @@ export interface ImportResult {
   missingSecrets: { name: string; algorithm: JwtAlgorithm }[];
   /** Works whose path one of this computer's works already answers. */
   clashes: { work: string; path: string; with: string }[];
+  /** Plugins the works use that this computer does not have: those works answer nothing until they are added. */
+  missingPlugins: string[];
 }
 
 export interface SecretPayload {

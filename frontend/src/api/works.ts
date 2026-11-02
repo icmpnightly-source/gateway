@@ -1,4 +1,5 @@
 import type { GatewayRule, GatewayRulePayload, SendRequest, SendResult } from '@/types/gateway.types';
+import { DEFAULT_JWT } from '@/modules/gateway/utils/plugins';
 import { engine } from './engine';
 
 /** Where the app's built-in echo service answers, for trying works out. */
@@ -7,7 +8,7 @@ export const ECHO_PATH = '/echo';
 /** Response header a recorded request's id comes back in. */
 export const TRACE_ID_HEADER = 'X-Trace-Id';
 
-/** What a new rule starts from. */
+/** What a new rule starts from: reading tokens, as a new work always did. */
 export function newRule(): GatewayRulePayload {
   return {
     name: '',
@@ -16,28 +17,8 @@ export function newRule(): GatewayRulePayload {
     destination: '',
     stripPath: true,
     timeoutSeconds: 30,
-    headers: [],
-    token: {
-      enabled: true,
-      header: 'Authorization',
-      claims: [],
-      payloadHeader: '',
-      forwardToken: true,
-      strict: true,
-      conditions: [],
-      verify: {
-        enabled: false,
-        secretId: '',
-        checkExpiry: true,
-        leeway: 0,
-        issuer: '',
-        audience: '',
-      },
-    },
-    requestId: { enabled: false, header: 'X-Request-Id', echo: true },
     tracing: { enabled: false, samplingPercent: 100, body: false },
-    rateLimit: { enabled: false, perMinute: 60, by: 'ip', header: '' },
-    cors: { enabled: false, origins: ['*'], credentials: false },
+    plugins: [{ name: 'jwt', enabled: true, config: structuredClone(DEFAULT_JWT) as unknown as Record<string, unknown> }],
   };
 }
 

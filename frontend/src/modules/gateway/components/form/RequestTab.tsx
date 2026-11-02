@@ -1,15 +1,14 @@
 import { useRef, useState } from 'react';
 import { Button, Form, Input, InputNumber, Modal, Select, message } from 'antd';
 import type { InputRef } from 'antd';
-import { LocateFixed, Network, Plus, Trash2 } from 'lucide-react';
+import { LocateFixed, Network } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ECHO_PATH } from '@/api/works';
-import { Hint } from '@/components/Hint';
 import { useAppSelector } from '@/store';
 import { HTTP_METHODS } from '@/types/gateway.types';
 import type { GatewayRule, HttpMethod } from '@/types/gateway.types';
 import { rememberAddress, rememberedAddress, withHost } from '../../utils/myAddress';
-import { HEADER_PATTERN, NAME_PATTERN, PATH_PATTERN, isBaseUrl } from '../../utils/validation';
+import { NAME_PATTERN, PATH_PATTERN, isBaseUrl } from '../../utils/validation';
 import { ToggleRow } from './Section';
 
 const METHOD_OPTIONS = HTTP_METHODS.map((method) => ({ value: method, label: method }));
@@ -215,59 +214,6 @@ export function RequestTab({ others, siblings, isNew }: RequestTabProps) {
       </Form.Item>
 
       <ToggleRow name="stripPath" label={t('gateway.stripPath')} hint={t('gateway.stripPathHint')} />
-
-      <div>
-        <div className="mb-(--c-spacing-xs) flex items-center gap-(--c-spacing-xs)">
-          <span>{t('gateway.headers')}</span>
-          <Hint text={t('gateway.headersHint')} />
-        </div>
-        <Form.List name="headers">
-          {(fields, { add, remove }) => (
-            <div className="flex flex-col gap-(--c-spacing-xs)">
-              {fields.map((field) => (
-                <div
-                  key={field.key}
-                  className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_32px] items-start gap-(--c-spacing-xs)"
-                >
-                  <Form.Item
-                    name={[field.name, 'name']}
-                    className="mb-0!"
-                    rules={[
-                      { required: true, whitespace: true, message: t('gateway.headerRequired') },
-                      { pattern: HEADER_PATTERN, message: t('gateway.headerInvalid') },
-                    ]}
-                  >
-                    <Input placeholder="X-Source" aria-label={t('gateway.headerName')} />
-                  </Form.Item>
-                  <Form.Item
-                    name={[field.name, 'value']}
-                    className="mb-0!"
-                    rules={[{ required: true, whitespace: true, message: t('gateway.headerValueRequired') }]}
-                  >
-                    <Input placeholder="gateway" aria-label={t('gateway.headerValue')} />
-                  </Form.Item>
-                  <Button
-                    type="text"
-                    danger
-                    aria-label={t('gateway.remove')}
-                    icon={<Trash2 size={14} />}
-                    onClick={() => remove(field.name)}
-                  />
-                </div>
-              ))}
-              <Button
-                type="dashed"
-                size="small"
-                icon={<Plus size={14} />}
-                onClick={() => add({ name: '', value: '' })}
-                className="self-start"
-              >
-                {t('gateway.addHeader')}
-              </Button>
-            </div>
-          )}
-        </Form.List>
-      </div>
 
       <Modal
         title={t('gateway.myIpChooseTitle')}

@@ -8,11 +8,9 @@ ui/
 dist-files/*.zip
 *.tsbuildinfo
 
-# Packaged / published app and offline bundle (made by the build)
+# The packaged app (made by the build)
 konggate-desktop/
-konggate-offline/
 *.zip
-*.tar.gz
 
 # Environment files and secrets
 .env

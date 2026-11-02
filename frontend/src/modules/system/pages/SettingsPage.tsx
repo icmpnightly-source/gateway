@@ -9,6 +9,7 @@ import { hasAdminPassword, setAdminPassword } from '@/api/secrets';
 import { fetchSettings, saveSettings, testDatabase } from '@/api/system';
 import type { DatabaseInput } from '@/api/system';
 import { AppearanceControls } from '@/components/AppearanceControls';
+import { PluginsSettings } from '../components/PluginsSettings';
 import { Hint } from '@/components/Hint';
 import { ROUTES, SETTINGS_PARAM, settingsSection } from '@/router/routes';
 import { useAppDispatch, useAppSelector } from '@/store';
@@ -93,7 +94,7 @@ function Toggle({ name, label, hint }: { name: string; label: string; hint: stri
 
 /**
  * How the app runs on this computer, a section at a time: the gateway's port,
- * how the app looks, its window, the shared database the secrets come from,
+ * its plugins, how the app looks, its window, the shared database the secrets come from,
  * where the projects are, the administrator's password.
  */
 export function SettingsPage() {
@@ -441,6 +442,10 @@ export function SettingsPage() {
             </Button>
           </div>
         </Form>
+      </Panel>
+
+      <Panel shown={section === 'plugins'} title={t('system.plugins')} hint={t('system.pluginsHint')}>
+        <PluginsSettings />
       </Panel>
 
       <Panel shown={section === 'data'} title={t('system.data')} hint={t('system.dataHint')}>

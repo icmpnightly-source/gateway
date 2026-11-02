@@ -25,6 +25,7 @@ import {
   usedRows,
 } from '../../utils/run';
 import type { BodyKind, RunDraft, TokenMode } from '../../utils/run';
+import { tokenOf } from '../../utils/plugins';
 import { parseJsonObject, unsignedToken } from '../../utils/token';
 import { KeyValueRows } from './KeyValueRows';
 
@@ -238,9 +239,10 @@ export function WorkRunner({ rule }: WorkRunnerProps) {
   // one by the same name was typed.
   const headers: SentHeader[] = usedRows(draft.headers).map((row) => ({ name: row.name.trim(), value: row.value }));
   const isTyped = (name: string) => headers.some((header) => header.name.toLowerCase() === name.toLowerCase());
-  if (token && !isTyped(rule.token.header)) {
-    const isBearer = rule.token.header.toLowerCase() === 'authorization';
-    headers.push({ name: rule.token.header, value: isBearer ? `Bearer ${token}` : token });
+  const { header: tokenHeader } = tokenOf(rule);
+  if (token && !isTyped(tokenHeader)) {
+    const isBearer = tokenHeader.toLowerCase() === 'authorization';
+    headers.push({ name: tokenHeader, value: isBearer ? `Bearer ${token}` : token });
   }
   if (body !== undefined && contentType && !isTyped('Content-Type')) headers.push({ name: 'Content-Type', value: contentType });
 
@@ -396,7 +398,7 @@ export function WorkRunner({ rule }: WorkRunnerProps) {
                   value={tokenMode}
                   onChange={(next) => change({ tokenMode: next })}
                   options={[
-                    ...(rule.token.enabled
+                    ...(tokenOf(rule).enabled
                       ? [{ value: 'sample' as const, label: t('gateway.tester.sampleToken'), disabled: !mayMakeSample }]
                       : []),
                     { value: 'custom', label: t('gateway.tester.customToken') },
@@ -404,7 +406,7 @@ export function WorkRunner({ rule }: WorkRunnerProps) {
                   ]}
                 />
 
-                {rule.token.enabled && !mayMakeSample && (
+                {tokenOf(rule).enabled && !mayMakeSample && (
                   <Text type="secondary" className="text-(length:--c-font-size-sm)!">
                     {t('gateway.tester.signatureNeeded')}
                   </Text>

@@ -13,6 +13,7 @@ import { MethodBadge } from '../components/MethodBadge';
 import { TokenStructureCard } from '../components/TokenStructureCard';
 import { WorkEditor } from '../components/WorkEditor';
 import { copyText } from '../utils/copy';
+import { pluginTitle, tokenOf } from '../utils/plugins';
 
 const { Title, Text } = Typography;
 
@@ -32,6 +33,7 @@ export function ProjectPage() {
   const { items: projects, status: projectsStatus } = useAppSelector((state) => state.projects);
   const { items: allRules, status, error } = useAppSelector((state) => state.gateway);
   const secrets = useAppSelector((state) => state.secrets.items);
+  const definitions = useAppSelector((state) => state.plugins.info?.plugins ?? []);
   const gatewayUrl = useGatewayUrl();
 
   const project = projects.find((candidate) => candidate.id === projectId);
@@ -119,13 +121,12 @@ export function ProjectPage() {
     else messageApi.error(t('gateway.copyFailed'));
   };
 
+  // The plugins switched on, but for the token's, which has a column of its own.
   const extrasOf = (rule: GatewayRule) => {
-    const extras: string[] = [];
-    if (rule.requestId.enabled) extras.push(t('gateway.requestId'));
+    const extras = rule.plugins
+      .filter((plugin) => plugin.enabled && plugin.name !== 'jwt')
+      .map((plugin) => pluginTitle(t, plugin.name, definitions.find((definition) => definition.name === plugin.name)));
     if (rule.tracing.enabled) extras.push(t('gateway.tracingTag'));
-    if (rule.rateLimit.enabled) extras.push(t('gateway.rateLimitTag', { n: rule.rateLimit.perMinute }));
-    if (rule.cors.enabled) extras.push(t('gateway.cors'));
-    if (rule.headers.length > 0) extras.push(t('gateway.headersTag', { n: rule.headers.length }));
     return extras;
   };
 
@@ -172,7 +173,8 @@ export function ProjectPage() {
       title: t('gateway.token'),
       key: 'token',
       responsive: ['md'],
-      render: (_, { token }) => {
+      render: (_, rule) => {
+        const token = tokenOf(rule);
         if (!token.enabled) return <Text type="secondary">{t('gateway.asIs')}</Text>;
 
         const secret = secrets.find((candidate) => candidate.id === token.verify.secretId);
