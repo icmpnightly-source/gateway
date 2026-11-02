@@ -132,7 +132,10 @@ export function RuleForm({ rule, project, others, onSubmit }: RuleFormProps) {
         if (field === 'plugins' && typeof index === 'number') setReveal({ index, at: Date.now() });
       }}
     >
-      <div className="grid gap-(--c-spacing) @3xl:grid-cols-[minmax(0,1fr)_340px]">
+      {/* The preview is about the request; the log's settings have nothing to show in it. */}
+      <div
+        className={`grid gap-(--c-spacing) ${activeTab === 'tracing' ? '' : '@3xl:grid-cols-[minmax(0,1fr)_340px]'}`}
+      >
         <Tabs
           activeKey={activeTab}
           onChange={(key) => setActiveTab(key as TabKey)}
@@ -173,10 +176,12 @@ export function RuleForm({ rule, project, others, onSubmit }: RuleFormProps) {
         />
 
         {/* Stays in view while the form scrolls past it. */}
-        <aside className="@3xl:sticky @3xl:top-(--c-spacing) @3xl:self-start">
-          <h3 className="m-0 mb-(--c-spacing-sm) text-sm font-semibold">{t('gateway.preview')}</h3>
-          <RequestPreview rule={values} />
-        </aside>
+        {activeTab !== 'tracing' && (
+          <aside className="@3xl:sticky @3xl:top-(--c-spacing) @3xl:self-start">
+            <h3 className="m-0 mb-(--c-spacing-sm) text-sm font-semibold">{t('gateway.preview')}</h3>
+            <RequestPreview rule={values} />
+          </aside>
+        )}
       </div>
     </Form>
   );

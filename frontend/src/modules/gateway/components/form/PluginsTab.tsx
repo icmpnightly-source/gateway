@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
-import { Alert, Button, Empty, Form, Modal, Popconfirm, Switch, Tag, Tooltip, Typography } from 'antd';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Puzzle, Trash2 } from 'lucide-react';
+import { Alert, Button, Dropdown, Empty, Form, Modal, Switch, Tag, Typography } from 'antd';
+import type { MenuProps } from 'antd';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Ellipsis, Plus, Puzzle, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Hint } from '@/components/Hint';
 import { settingsPath } from '@/router/routes';
@@ -12,8 +13,18 @@ import { insertionIndex, newInstance, pluginDescription, pluginTitle } from '../
 import { CorsSettings } from './CorsSettings';
 import { JwtSettings } from './JwtSettings';
 import { PluginFields } from './PluginFields';
+import { FlatSections } from './Section';
 
 const { Text } = Typography;
+
+// The built-in plugins by what they are for, in the order "Add" lists them.
+// One not named here (a newer built-in one) goes under "other".
+const GROUPS: { key: string; names: string[] }[] = [
+  { key: 'access', names: ['jwt', 'key-auth', 'basic-auth', 'ip-restriction'] },
+  { key: 'protect', names: ['rate-limit', 'request-size-limit', 'cors'] },
+  { key: 'change', names: ['request-transformer', 'response-transformer', 'request-id'] },
+  { key: 'speed', names: ['proxy-cache'] },
+];
 
 interface PluginSettingsProps {
   instance: PluginInstance;
@@ -69,6 +80,7 @@ export function PluginsTab({ tokenFields, sample, onSample, reveal }: PluginsTab
   const plugins = (Form.useWatch('plugins', { preserve: true }) ?? []) as PluginInstance[];
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
+  const [modal, modalHolder] = Modal.useModal();
 
   useEffect(() => {
     if (status === 'idle') void dispatch(loadPlugins());
@@ -108,6 +120,16 @@ export function PluginsTab({ tokenFields, sample, onSample, reveal }: PluginsTab
   };
 
   const available = definitions.filter((definition) => !plugins.some((plugin) => plugin?.name === definition.name));
+  // What "Add" offers, by purpose; the computer's own plugins last.
+  const grouped = new Set(GROUPS.flatMap((group) => group.names));
+  const groups = [
+    ...GROUPS.map((group) => ({
+      key: group.key,
+      definitions: group.names.flatMap((name) => definitions.filter((definition) => definition.builtIn && definition.name === name)),
+    })),
+    { key: 'other', definitions: definitions.filter((definition) => definition.builtIn && !grouped.has(definition.name)) },
+    { key: 'custom', definitions: definitions.filter((definition) => !definition.builtIn) },
+  ].filter((group) => group.definitions.length > 0);
 
   return (
     <div className="flex flex-col gap-(--c-spacing-sm)">
@@ -133,73 +155,95 @@ export function PluginsTab({ tokenFields, sample, onSample, reveal }: PluginsTab
         const definition = definitionOf(instance.name);
         const isOpen = open.has(instance.name);
         const title = pluginTitle(t, instance.name, definition);
+        const description = definition ? pluginDescription(t, definition) : t('plugins.notInstalledShort');
+
+        // Rare, and one of them destructive: kept in a menu, out of the way of the switch.
+        const actions: MenuProps['items'] = [
+          { key: 'up', icon: <ArrowUp size={14} />, label: t('plugins.moveUp'), disabled: index === 0 },
+          {
+            key: 'down',
+            icon: <ArrowDown size={14} />,
+            label: t('plugins.moveDown'),
+            disabled: index === plugins.length - 1,
+          },
+          { type: 'divider' },
+          { key: 'remove', icon: <Trash2 size={14} />, label: t('plugins.remove'), danger: true },
+        ];
+        const act: MenuProps['onClick'] = ({ key }) => {
+          if (key === 'up') move(index, index - 1);
+          if (key === 'down') move(index, index + 1);
+          if (key === 'remove') {
+            modal.confirm({
+              title: t('plugins.removeConfirm', { name: title }),
+              content: t('plugins.removeConfirmText'),
+              okText: t('plugins.remove'),
+              okButtonProps: { danger: true },
+              cancelText: t('gateway.cancel'),
+              onOk: () => remove(index),
+            });
+          }
+        };
+
         return (
           <section
             key={instance.name}
             // A plugin switched off is drawn dashed: it is there, doing nothing.
-            className={`rounded-(--c-border-radius-lg) border border-line-soft ${instance.enabled ? '' : 'border-dashed opacity-80'}`}
+            className={`rounded-(--c-border-radius-lg) border border-line-soft bg-container ${instance.enabled ? '' : 'border-dashed'}`}
           >
-            <div className="flex items-center gap-(--c-spacing-xs) p-(--c-spacing-sm)">
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-layout text-xs text-subtle">
-                {index + 1}
-              </span>
+            <div className="flex items-start gap-(--c-spacing-xs) p-(--c-spacing-sm)">
               <button
                 type="button"
                 onClick={() => toggleOpen(instance.name)}
                 aria-expanded={isOpen}
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-(--c-spacing-xs) border-0 bg-transparent p-0 text-start"
+                className="flex min-w-0 flex-1 cursor-pointer items-start gap-(--c-spacing-xs) border-0 bg-transparent p-0 text-start"
               >
-                {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                <span className="truncate font-semibold">{title}</span>
-                {definition && !definition.builtIn && <Tag className="me-0!">{t('plugins.custom')}</Tag>}
-                {!definition && status === 'ready' && (
-                  <Tag color="error" className="me-0!">
-                    {t('plugins.missingTag')}
-                  </Tag>
-                )}
+                <span className="mt-0.5 shrink-0 text-subtle">
+                  {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </span>
+                <span className="mt-px inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-layout text-xs text-subtle">
+                  {index + 1}
+                </span>
+                <span className={`flex min-w-0 flex-col ${instance.enabled ? '' : 'opacity-60'}`}>
+                  <span className="flex min-w-0 flex-wrap items-center gap-(--c-spacing-xs)">
+                    <span className="font-semibold">{title}</span>
+                    {definition && !definition.builtIn && <Tag className="me-0!">{t('plugins.custom')}</Tag>}
+                    {!definition && status === 'ready' && (
+                      <Tag color="error" className="me-0!">
+                        {t('plugins.missingTag')}
+                      </Tag>
+                    )}
+                    {!instance.enabled && <Tag className="me-0!">{t('plugins.off')}</Tag>}
+                  </span>
+                  {/* What it does, in a line: read at a glance instead of behind a "?". */}
+                  <Text type="secondary" className={`text-xs! ${isOpen ? '' : 'line-clamp-1'}`}>
+                    {description}
+                  </Text>
+                </span>
               </button>
-              {definition && <Hint text={pluginDescription(t, definition)} />}
-              <Tooltip title={t('plugins.moveUp')}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<ArrowUp size={14} />}
-                  disabled={index === 0}
-                  onClick={() => move(index, index - 1)}
-                  aria-label={t('plugins.moveUp')}
-                />
-              </Tooltip>
-              <Tooltip title={t('plugins.moveDown')}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<ArrowDown size={14} />}
-                  disabled={index === plugins.length - 1}
-                  onClick={() => move(index, index + 1)}
-                  aria-label={t('plugins.moveDown')}
-                />
-              </Tooltip>
               <Form.Item name={['plugins', index, 'enabled']} valuePropName="checked" noStyle>
-                <Switch size="small" aria-label={t('plugins.enabled', { name: title })} />
+                <Switch size="small" className="mt-0.5" aria-label={t('plugins.enabled', { name: title })} />
               </Form.Item>
-              <Popconfirm
-                title={t('plugins.removeConfirm', { name: title })}
-                okText={t('gateway.remove')}
-                onConfirm={() => remove(index)}
-              >
-                <Button type="text" danger size="small" icon={<Trash2 size={14} />} aria-label={t('gateway.remove')} />
-              </Popconfirm>
+              <Dropdown menu={{ items: actions, onClick: act }} trigger={['click']} placement="bottomRight">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<Ellipsis size={16} />}
+                  aria-label={t('plugins.actions', { name: title })}
+                />
+              </Dropdown>
             </div>
             {/* Rendered while closed too, so that saving checks every plugin's settings. */}
-            <div className={isOpen ? 'border-t border-line-soft p-(--c-spacing-sm)' : 'hidden'}>
-              <PluginSettings
-                instance={instance}
-                index={index}
-                definition={definition}
-                tokenFields={tokenFields}
-                sample={sample}
-                onSample={onSample}
-              />
+            <div className={isOpen ? 'border-t border-line-soft p-(--c-spacing)' : 'hidden'}>
+              <FlatSections.Provider value>
+                <PluginSettings
+                  instance={instance}
+                  index={index}
+                  definition={definition}
+                  tokenFields={tokenFields}
+                  sample={sample}
+                  onSample={onSample}
+                />
+              </FlatSections.Provider>
             </div>
           </section>
         );
@@ -209,32 +253,47 @@ export function PluginsTab({ tokenFields, sample, onSample, reveal }: PluginsTab
         title={t('plugins.addTitle')}
         open={isAdding}
         footer={null}
+        width={760}
         onCancel={() => setIsAdding(false)}
         destroyOnHidden
       >
-        <div className="flex max-h-[60vh] flex-col gap-(--c-spacing-xs) overflow-y-auto">
-          {available.map((definition) => (
-            <button
-              key={definition.name}
-              type="button"
-              onClick={() => add(definition)}
-              className="flex cursor-pointer flex-col items-start gap-1 rounded-(--c-border-radius) border border-line-soft bg-transparent p-(--c-spacing-sm) text-start hover:border-brand"
-            >
-              <span className="flex items-center gap-(--c-spacing-xs) font-semibold">
-                <Puzzle size={14} />
-                {pluginTitle(t, definition.name, definition)}
-                {!definition.builtIn && <Tag className="me-0!">{t('plugins.custom')}</Tag>}
-              </span>
-              <Text type="secondary" className="text-xs!">
-                {pluginDescription(t, definition)}
-              </Text>
-            </button>
+        <div className="flex max-h-[65vh] flex-col gap-(--c-spacing) overflow-y-auto pe-1">
+          {groups.map((group) => (
+            <div key={group.key} className="flex flex-col gap-(--c-spacing-xs)">
+              <Text strong>{t(`plugins.groups.${group.key}`)}</Text>
+              <div className="grid gap-(--c-spacing-xs) sm:grid-cols-2">
+                {group.definitions.map((definition) => {
+                  const isOnWork = plugins.some((plugin) => plugin?.name === definition.name);
+                  return (
+                    <button
+                      key={definition.name}
+                      type="button"
+                      disabled={isOnWork}
+                      onClick={() => add(definition)}
+                      className={`flex flex-col items-start gap-1 rounded-(--c-border-radius) border border-line-soft bg-transparent p-(--c-spacing-sm) text-start ${
+                        isOnWork ? 'cursor-default opacity-60' : 'cursor-pointer hover:border-brand'
+                      }`}
+                    >
+                      <span className="flex flex-wrap items-center gap-(--c-spacing-xs) font-semibold">
+                        <Puzzle size={14} />
+                        {pluginTitle(t, definition.name, definition)}
+                        {isOnWork && <Tag className="me-0!">{t('plugins.alreadyAdded')}</Tag>}
+                      </span>
+                      <Text type="secondary" className="text-xs!">
+                        {pluginDescription(t, definition)}
+                      </Text>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ))}
         </div>
         <div className="mt-(--c-spacing-sm)">
           <RouterLink to={settingsPath('plugins')}>{t('plugins.ownPluginsLink')}</RouterLink>
         </div>
       </Modal>
+      {modalHolder}
     </div>
   );
 }

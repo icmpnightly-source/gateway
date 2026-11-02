@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Card, Empty, Popconfirm, Spin, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
-import { ArrowRight, Play, Plus, ScrollText, Trash2 } from 'lucide-react';
+import { Play, Plus, ScrollText, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import { ROUTES, WORK_PARAM, projectPath, requestsPath, workPath } from '@/router/routes';
@@ -18,7 +18,8 @@ import { pluginTitle, tokenOf } from '../utils/plugins';
 const { Title, Text } = Typography;
 
 // Mappings shown per work in the table before the rest collapse into "+N".
-const MAX_CLAIM_TAGS = 3;
+// Past this many, a work's plugins are counted rather than named.
+const MAX_PLUGIN_TAGS = 4;
 
 const TAG_ROW = 'flex flex-wrap gap-(--c-spacing-xxs)';
 
@@ -34,6 +35,7 @@ export function ProjectPage() {
   const { items: allRules, status, error } = useAppSelector((state) => state.gateway);
   const secrets = useAppSelector((state) => state.secrets.items);
   const definitions = useAppSelector((state) => state.plugins.info?.plugins ?? []);
+  const pluginsReady = useAppSelector((state) => state.plugins.status === 'ready');
   const gatewayUrl = useGatewayUrl();
 
   const project = projects.find((candidate) => candidate.id === projectId);
@@ -121,15 +123,6 @@ export function ProjectPage() {
     else messageApi.error(t('gateway.copyFailed'));
   };
 
-  // The plugins switched on, but for the token's, which has a column of its own.
-  const extrasOf = (rule: GatewayRule) => {
-    const extras = rule.plugins
-      .filter((plugin) => plugin.enabled && plugin.name !== 'jwt')
-      .map((plugin) => pluginTitle(t, plugin.name, definitions.find((definition) => definition.name === plugin.name)));
-    if (rule.tracing.enabled) extras.push(t('gateway.tracingTag'));
-    return extras;
-  };
-
   const newWork = () => navigate(workPath(project.id, 'new'));
 
   const columns: ColumnsType<GatewayRule> = [
@@ -170,56 +163,47 @@ export function ProjectPage() {
       render: (destination: string) => <Text code>{destination}</Text>,
     },
     {
-      title: t('gateway.token'),
-      key: 'token',
+      // What is done with the work's requests: its plugins switched on, in the order they run.
+      title: t('plugins.tab'),
+      key: 'plugins',
       responsive: ['md'],
       render: (_, rule) => {
+        const enabled = rule.plugins.filter((plugin) => plugin.enabled);
+        if (enabled.length === 0) return <Text type="secondary">{t('plugins.noneShort')}</Text>;
+
         const token = tokenOf(rule);
-        if (!token.enabled) return <Text type="secondary">{t('gateway.asIs')}</Text>;
-
         const secret = secrets.find((candidate) => candidate.id === token.verify.secretId);
-        const hidden = token.claims.length - MAX_CLAIM_TAGS;
+        const hidden = enabled.length - MAX_PLUGIN_TAGS;
         return (
           <div className={TAG_ROW}>
-            <Tag color={token.verify.enabled ? 'success' : 'warning'} className="me-0!">
-              {token.verify.enabled
-                ? t('gateway.verifiedTag', { name: secret?.name ?? '?' })
-                : t('gateway.unverifiedTag')}
-            </Tag>
-            {token.claims.slice(0, MAX_CLAIM_TAGS).map((mapping) => (
-              <Tag
-                key={`${mapping.claim}:${mapping.header}`}
-                color="processing"
-                className="me-0! inline-flex items-center gap-1"
-              >
-                {mapping.claim}
-                <ArrowRight size={12} />
-                {mapping.header}
-              </Tag>
-            ))}
+            {enabled.slice(0, MAX_PLUGIN_TAGS).map((plugin) => {
+              const definition = definitions.find((candidate) => candidate.name === plugin.name);
+              const title = pluginTitle(t, plugin.name, definition);
+              if (plugin.name === 'jwt') {
+                return (
+                  <Tooltip
+                    key={plugin.name}
+                    title={
+                      token.verify.enabled
+                        ? t('gateway.verifiedTag', { name: secret?.name ?? '?' })
+                        : t('gateway.unverifiedTag')
+                    }
+                  >
+                    <Tag color={token.verify.enabled ? 'success' : 'warning'} className="me-0!">
+                      {title}
+                    </Tag>
+                  </Tooltip>
+                );
+              }
+              // A plugin this computer lacks: the work lets nothing through.
+              const isMissing = pluginsReady && !definition;
+              return (
+                <Tag key={plugin.name} color={isMissing ? 'error' : undefined} className="me-0!">
+                  {title}
+                </Tag>
+              );
+            })}
             {hidden > 0 && <Tag className="me-0!">+{hidden}</Tag>}
-            {token.conditions.length > 0 && (
-              <Tag className="me-0!">{t('gateway.conditionsTag', { n: token.conditions.length })}</Tag>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      title: t('gateway.extras'),
-      key: 'extras',
-      responsive: ['xl'],
-      render: (_, rule) => {
-        const extras = extrasOf(rule);
-        if (extras.length === 0) return <Text type="secondary">—</Text>;
-
-        return (
-          <div className={TAG_ROW}>
-            {extras.map((extra) => (
-              <Tag key={extra} className="me-0!">
-                {extra}
-              </Tag>
-            ))}
           </div>
         );
       },

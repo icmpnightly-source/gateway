@@ -184,7 +184,6 @@
     "tracingSamplingRequired": "1 dan 100 gacha son kiriting",
     "tracingBody": "Body'ni ham yozish",
     "tracingBodyHint": "So'rov va javob body'sining dastlabki 2000 belgisi. Ichida parol bo'lishi mumkin: ilovani ochgan har kim uni ko'radi",
-    "tracingTag": "Jurnal",
     "corsOrigins": "Ruxsat etilgan saytlar",
     "corsOriginsHint": "Masalan https://app.example.com. Istalgan sayt uchun *",
     "corsOriginsRequired": "Kamida bitta origin kiriting",
@@ -192,7 +191,7 @@
     "corsAnyWithCredentials": "Cookie'ga ruxsat berilganda * mumkin emas: aniq saytlarni kiriting",
     "corsCredentials": "Cookie bilan so'rovlarga ruxsat",
     "corsCredentialsHint": "Brauzer so'rov bilan cookie yubora oladi",
-    "preview": "Natija",
+    "preview": "So'rov qanday o'tadi",
     "clientSends": "Mijoz yuboradi",
     "destinationReceives": "Manzil qabul qiladi",
     "previewVerified": "Imzo: {{name}}",
@@ -203,11 +202,8 @@
     "previewCondition": "{{claim}}: {{values}}, aks holda 403",
     "previewRateLimit": "{{n}}/daq dan ko'p → 429",
     "previewTimeout": "{{n}} s javobsiz → 504",
-    "asIs": "O'zgarishsiz",
     "verifiedTag": "Tekshiriladi · {{name}}",
     "unverifiedTag": "Tekshirilmaydi",
-    "conditionsTag": "{{n}} ta shart",
-    "extras": "Qo'shimcha",
     "actions": "Amallar",
     "test": "Sinab ko'rish",
     "edit": "Tahrirlash",
@@ -335,14 +331,13 @@
   "requests": {
     "title": "So'rovlar jurnali",
     "subtitle": "Faqat «Jurnalga yozish» yoqilgan ishlarning so'rovlari",
-    "empty": "Yozilgan so'rov yo'q. Ishning «Kuzatuv» bo'limida jurnalga yozishni yoqing.",
+    "empty": "Yozilgan so'rov yo'q. Ishning «Jurnal» bo'limida jurnalga yozishni yoqing.",
     "time": "Vaqt",
     "work": "Ish",
     "request": "So'rov",
     "status": "Javob",
     "duration": "Davomiyligi",
     "destination": "Yuborilgan manzil",
-    "answeredByGateway": "Shlyuz o'zi javob berdi",
     "allWorks": "Barcha ishlar",
     "autoRefresh": "Avtomatik yangilash",
     "clear": "Tozalash",
@@ -353,7 +348,7 @@
     "clientIp": "Mijoz manzili",
     "headers": "Sarlavhalar",
     "body": "Body",
-    "notSent": "Serverga hech narsa yuborilmadi: shlyuz o'zi {{status}} javobini berdi.",
+    "notSent": "Manzilga yuborilmadi",
     "destinationIp": "Server IP manzili",
     "answered": "Server javobi",
     "gone": "Bu so'rov jurnalda qolmagan",
@@ -373,7 +368,7 @@
     "byGatewayFull": "Javobni shlyuzning o'zi berdi",
     "byDestinationFull": "Server javobi mijozga o'zgarishsiz uzatildi",
     "sameBody": "Body kelganidek, o'zgarishsiz yuborildi",
-    "bodyOff": "Body yozilmagan. Ishning «Kuzatuv» bo'limida yoqing.",
+    "bodyOff": "Body yozilmagan. Ishning «Jurnal» bo'limida yoqing.",
     "openWork": "Ishni ochish",
     "noResponse": "Server javob bermadi",
     "took": "{{ms}} ms",
@@ -387,6 +382,18 @@
       "not_http": "HTTP emas",
       "tls": "https xatosi",
       "failed": "ulanmadi"
+    },
+    "refusals": {
+      "token": "token yo'q yoki yaroqsiz",
+      "condition": "token ruxsat bermadi",
+      "key": "API kalit yo'q yoki noto'g'ri",
+      "basic": "login yoki parol noto'g'ri",
+      "ip": "IP manzilga ruxsat yo'q",
+      "rate_limit": "limitdan oshdi",
+      "too_large": "tana juda katta",
+      "plugin": "plagin xatosi",
+      "plugin_missing": "plagin o'rnatilmagan",
+      "bad_destination": "manzil noto'g'ri"
     }
   },
   "system": {
@@ -662,6 +669,21 @@
           "maxEntryKilobytes": "Saqlanadigan eng katta javob, KB"
         }
       }
+    },
+    "noneShort": "Plaginsiz",
+    "off": "o'chiq",
+    "remove": "Olib tashlash",
+    "removeConfirmText": "Uning sozlamalari ham o'chadi. Vaqtincha to'xtatish uchun o'rniga uni o'chirib qo'ying.",
+    "actions": "{{name}}: amallar",
+    "alreadyAdded": "qo'shilgan",
+    "notInstalledShort": "Bu kompyuterda yo'q: yoqilgan ekan, ish so'rovlarni o'tkazmaydi",
+    "groups": {
+      "access": "Kim kira oladi",
+      "protect": "Himoya",
+      "change": "So'rov va javobni o'zgartirish",
+      "speed": "Tezlik",
+      "other": "Boshqa",
+      "custom": "O'z plaginlaringiz"
     }
   }
 }

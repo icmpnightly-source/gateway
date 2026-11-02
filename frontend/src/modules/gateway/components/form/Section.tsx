@@ -1,9 +1,17 @@
+import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import { Form, Switch } from 'antd';
 import type { NamePath } from 'antd/es/form/interface';
 import { Hint } from '@/components/Hint';
 
 const FRAME = 'rounded-(--c-border-radius-lg) border border-line-soft p-(--c-spacing)';
+// Inside something that is framed already (a plugin's settings), a section is
+// only its heading and a line above it: no box inside a box.
+const FLAT = 'border-t border-line-soft pt-(--c-spacing) first:border-t-0 first:pt-0';
+
+/** Set by a container that frames its sections itself. */
+export const FlatSections = createContext(false);
+const useFrame = () => (useContext(FlatSections) ? FLAT : FRAME);
 
 function Heading({ title, hint, badge }: { title: string; hint?: string; badge?: ReactNode }) {
   return (
@@ -26,7 +34,7 @@ interface SectionProps {
 
 export function Section({ title, hint, badge, children }: SectionProps) {
   return (
-    <section className={FRAME}>
+    <section className={useFrame()}>
       <Heading title={title} hint={hint} badge={badge} />
       {children && <div className="mt-(--c-spacing-sm)">{children}</div>}
     </section>
@@ -44,7 +52,7 @@ export function FeatureSection({ toggle, title, hint, badge, children }: Feature
   const isOn = Form.useWatch(toggle) as boolean | undefined;
 
   return (
-    <section className={FRAME}>
+    <section className={useFrame()}>
       <div className="flex items-center justify-between gap-(--c-spacing-sm)">
         <Heading title={title} hint={hint} badge={badge} />
         <Form.Item name={toggle} valuePropName="checked" noStyle>
