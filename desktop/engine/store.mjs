@@ -7,20 +7,18 @@
 // JSON file, which never holds a secret's value.
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, renameSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, renameSync } from 'node:fs';
+import { usesSecret } from './plugins/index.mjs';
+import { Refusal } from './refusal.mjs';
 import { PLAIN_VAULT, writeWhole } from './settings.mjs';
 
-/** What the data file and an exported project are marked with. */
-const FORMAT = 1;
+export { Refusal };
 
-/** A failure the caller is expected to explain to the user, with the HTTP status that fits. */
-export class Refusal extends Error {
-  constructor(status, message, extra = {}) {
-    super(message);
-    this.status = status;
-    this.extra = extra;
-  }
-}
+/**
+ * What the data file and an exported project are marked with: 2 since works
+ * hold plugins. A project file of format 1 is still read (see the API).
+ */
+const FORMAT = 2;
 
 const EMPTY = { format: FORMAT, projects: [], works: [], secrets: [], adminPassword: null };
 
@@ -38,13 +36,13 @@ const shown = (secret) => ({
   createdAt: secret.createdAt,
 });
 
-const usesSecret = (work, id) => work.token.enabled && work.token.verify.enabled && work.token.verify.secretId === id;
-
 /**
  * `vault` (`{ seal, open }`) is what secrets' values are kept in the file
- * with; without one they are only kept out of plain sight.
+ * with; without one they are only kept out of plain sight. `migrate` brings
+ * a work kept in an older shape up to date; a file it changes is copied
+ * aside first, as it was.
  */
-export function openStore(file, vault = PLAIN_VAULT) {
+export function openStore(file, vault = PLAIN_VAULT, { migrate } = {}) {
   let data = copy(EMPTY);
   // Goes up with every change: how the screens notice there is something new.
   let revision = 1;
@@ -68,6 +66,16 @@ export function openStore(file, vault = PLAIN_VAULT) {
   function save() {
     revision += 1;
     writeWhole(file, `${JSON.stringify(data, null, 2)}\n`);
+  }
+
+  if (migrate) {
+    const works = data.works.map((work) => migrate(work));
+    if (works.some((work, index) => work !== data.works[index])) {
+      const before = `${file}.before-plugins`;
+      if (existsSync(file) && !existsSync(before)) copyFileSync(file, before);
+      data.works = works;
+      save();
+    }
   }
 
   const seal = (value) => vault.seal(value);
@@ -262,11 +270,15 @@ export function openStore(file, vault = PLAIN_VAULT) {
       const works = data.works
         .filter((work) => work.projectId === id)
         .map(({ id: _id, projectId: _projectId, createdAt: _createdAt, ...work }) => {
-          const { secretId, ...verify } = work.token.verify;
-          const secret = secrets.find((candidate) => candidate.id === secretId);
-          if (secret) used.set(secret.id, { name: secret.name, algorithm: secret.algorithm });
+          const plugins = work.plugins.map((plugin) => {
+            if (plugin.name !== 'jwt') return plugin;
+            const { secretId, ...verify } = plugin.config.verify;
+            const secret = secrets.find((candidate) => candidate.id === secretId);
+            if (secret) used.set(secret.id, { name: secret.name, algorithm: secret.algorithm });
+            return { ...plugin, config: { ...plugin.config, verify: { ...verify, secret: secret?.name ?? '' } } };
+          });
 
-          return { ...work, token: { ...work.token, verify: { ...verify, secret: secret?.name ?? '' } } };
+          return { ...work, plugins };
         });
 
       return copy({

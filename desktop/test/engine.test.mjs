@@ -10,7 +10,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHmac, generateKeyPairSync, sign as signWith, constants } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,6 +34,8 @@ function expect(name, actual, expected) {
 
 // --- a destination that says what it was sent ---------------------------------
 
+// How many requests the destination has answered: a cached answer leaves it as it was.
+let served = 0;
 const upstream = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (chunk) => chunks.push(chunk));
@@ -41,7 +43,9 @@ const upstream = http.createServer((req, res) => {
     if (req.url.startsWith('/slow')) await sleep(3000);
     if (req.url.startsWith('/drop')) return void req.socket.destroy();
 
+    served += 1;
     const body = JSON.stringify({
+      served,
       method: req.method,
       url: req.url,
       headers: req.headers,
@@ -54,7 +58,8 @@ const upstream = http.createServer((req, res) => {
     const compressed = req.url.startsWith('/gzip');
     res.writeHead(req.url.startsWith('/teapot') ? 418 : 200, {
       'Content-Type': 'application/json',
-      'Set-Cookie': ['a=1', 'b=2'],
+      // An answer with cookies is meant for one caller: a cache does not keep it.
+      ...(req.url.includes('nocookie') ? {} : { 'Set-Cookie': ['a=1', 'b=2'] }),
       'X-From-Destination': 'yes',
       ...(compressed ? { 'Content-Encoding': 'gzip' } : {}),
     });
@@ -174,7 +179,8 @@ try {
 
   console.log('\n# forwarding');
   const plain = await addWork({ name: 'plain', path: '/plain' });
-  expect('a work comes back whole', [plain.name, plain.path, plain.token.enabled, plain.rateLimit.perMinute, plain.cors.origins], ['plain', '/plain', false, 60, ['*']]);
+  expect('a work comes back whole', [plain.name, plain.path, plain.plugins, plain.tracing.samplingPercent], ['plain', '/plain', [], 100]);
+  expect('with nothing of the old shape left', [plain.token, plain.cors, plain.rateLimit, plain.headers, plain.requestId], [undefined, undefined, undefined, undefined, undefined]);
   r = await api('POST', '/works', { projectId, ...work({ name: 'plain', path: '/other' }) });
   expect('a second work by the same name is refused', r.status, 409);
   r = await api('POST', '/works', { projectId, ...work({ name: 'bad', path: 'no-slash' }) });
@@ -508,9 +514,9 @@ try {
   console.log('\n# a project as a file');
   r = await api('GET', `/projects/${projectId}/export`);
   const exported = r.json;
-  expect('a project is exported with its works', [r.status, exported.konggate, exported.project.name, exported.works.length > 10, exported.works.some((item) => 'id' in item || 'projectId' in item)], [200, 1, `test-${suffix}`, true, false]);
-  const exportedVerified = exported.works.find((item) => item.name === 'verified');
-  expect('its secrets go by name, never by value', [exportedVerified.token.verify.secret, exportedVerified.token.verify.secretId, exported.secrets.find((secret) => secret.name === `hs-${suffix}-renamed`), r.raw.includes('new secret'), r.raw.includes(Buffer.from('new secret').toString('base64'))], [`hs-${suffix}-renamed`, undefined, { name: `hs-${suffix}-renamed`, algorithm: 'HS256' }, false, false]);
+  expect('a project is exported with its works', [r.status, exported.konggate, exported.project.name, exported.works.length > 10, exported.works.some((item) => 'id' in item || 'projectId' in item)], [200, 2, `test-${suffix}`, true, false]);
+  const exportedVerified = exported.works.find((item) => item.name === 'verified').plugins.find((plugin) => plugin.name === 'jwt').config;
+  expect('its secrets go by name, never by value', [exportedVerified.verify.secret, exportedVerified.verify.secretId, exported.secrets.find((secret) => secret.name === `hs-${suffix}-renamed`), r.raw.includes('new secret'), r.raw.includes(Buffer.from('new secret').toString('base64'))], [`hs-${suffix}-renamed`, undefined, { name: `hs-${suffix}-renamed`, algorithm: 'HS256' }, false, false]);
 
   const toTwo = (method, url, body, headers) => call(two.app, method, `/api${url}`, body, headers);
   r = await toTwo('POST', '/projects/import', { konggate: 1, project: {} });
@@ -562,6 +568,258 @@ try {
   r = await api('POST', '/secrets', { name: 'x', algorithm: 'HS256', value: 'v' }, session);
   expect('but not the sign-in sessions', r.status, 401);
 
+  console.log('\n# plugins');
+  const pluginsFolder = path.join(path.dirname(one.dataFile), 'plugins');
+  r = await api('GET', '/plugins');
+  expect('the built-in plugins are listed', [r.status, r.json.plugins.filter((plugin) => plugin.builtIn).map((plugin) => plugin.name).sort()], [200, ['basic-auth', 'cors', 'ip-restriction', 'jwt', 'key-auth', 'proxy-cache', 'rate-limit', 'request-id', 'request-size-limit', 'request-transformer', 'response-transformer']]);
+  expect('with the folder custom ones come from, made with a README', [r.json.folder, existsSync(path.join(pluginsFolder, 'README.txt')), r.json.errors], [pluginsFolder, true, []]);
+  expect('each with its settings and their defaults', [r.json.plugins.find((plugin) => plugin.name === 'key-auth').defaults.header, r.json.plugins.find((plugin) => plugin.name === 'cors').fields.map((field) => field.key)], ['X-API-Key', ['origins', 'credentials']]);
+
+  const toTwoLater = (method, url, body, headers) => call(two.app, method, `/api${url}`, body, headers);
+  const withPlugins = (name, plugins, overrides = {}) => addWork({ name, path: `/${name}`, plugins, ...overrides });
+  const refused = async (plugins) => (await api('POST', '/works', { projectId, ...work({ name: `bad-${Math.random().toString(36).slice(2, 8)}`, path: '/never', plugins }) })).status;
+  expect('a plugin twice on one work is refused', await refused([{ name: 'cors' }, { name: 'cors' }]), 400);
+  expect('so is a name that cannot be a plugin\'s', await refused([{ name: 'Not A Name' }]), 400);
+  expect('and settings a plugin cannot take', [await refused([{ name: 'ip-restriction', config: { deny: ['nonsense'] } }]), await refused([{ name: 'key-auth', config: { keys: [{ name: 'short', key: 'too-short' }] } }])], [400, 400]);
+
+  console.log('\n# IP restriction');
+  await withPlugins('ip-deny', [{ name: 'ip-restriction', config: { deny: ['127.0.0.1'] } }]);
+  r = await through('GET', '/ip-deny');
+  expect('a denied address is refused', [r.status, r.json.reason], [403, 'ip']);
+  await withPlugins('ip-allow-other', [{ name: 'ip-restriction', config: { allow: ['10.0.0.0/8', 'fd00::/8'] } }]);
+  r = await through('GET', '/ip-allow-other');
+  expect('so is one outside the networks allowed', r.status, 403);
+  await withPlugins('ip-allow-local', [{ name: 'ip-restriction', config: { allow: ['127.0.0.0/8'], status: 404 } }]);
+  r = await through('GET', '/ip-allow-local');
+  expect('one inside them goes through', r.status, 200);
+
+  console.log('\n# API keys');
+  const aliceKey = 'alice-key-0123456789abcdef';
+  const keyed = await withPlugins('keyed', [{ name: 'key-auth', config: { keys: [{ name: 'alice', key: aliceKey }, { name: 'bob', key: 'bob-key-0123456789abcdef' }], queryParam: 'apikey' } }]);
+  const keptKeys = keyed.plugins[0].config.keys;
+  expect('keys are kept as hashes, never as themselves', [keptKeys.map((key) => [key.name, key.hint, key.hash.length]), JSON.stringify(keyed).includes(aliceKey)], [[['alice', 'cdef', 64], ['bob', 'cdef', 64]], false]);
+  r = await through('GET', '/keyed');
+  expect('without a key: 401', [r.status, r.json.reason], [401, 'key']);
+  r = await through('GET', '/keyed', { headers: { 'X-API-Key': 'not-a-key-0123456789abcdef' } });
+  expect('with a wrong one: 401', [r.status, r.json.message], [401, 'Unauthorized: the API key is not valid']);
+  r = await through('GET', '/keyed', { headers: { 'X-API-Key': aliceKey } });
+  expect('with a right one it goes through, the key kept back and its name passed on', [r.status, r.json.headers['x-api-key'], r.json.headers['x-consumer']], [200, undefined, 'alice']);
+  r = await through('GET', `/keyed/x?apikey=${aliceKey}&keep=1`);
+  expect('a key may come in the query too, which is cleared of it', [r.status, r.json.url, r.json.headers['x-consumer']], [200, '/x?keep=1', 'alice']);
+  r = await api('PUT', `/works/${keyed.id}`, { ...work({ name: 'keyed', path: '/keyed' }), plugins: keyed.plugins });
+  r = await through('GET', '/keyed', { headers: { 'X-API-Key': aliceKey } });
+  expect('saved again as it came back, the keys still open it', r.status, 200);
+
+  console.log('\n# basic sign-in');
+  const basic = (user, password) => ({ Authorization: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}` });
+  const signedIn = await withPlugins('basic', [{ name: 'basic-auth', config: { users: [{ username: 'bob', password: 'bob-password' }], realm: 'Test' } }]);
+  expect('a password is kept as a salted hash', [Object.keys(signedIn.plugins[0].config.users[0]).sort(), JSON.stringify(signedIn).includes('bob-password')], [['hash', 'salt', 'username'], false]);
+  r = await through('GET', '/basic');
+  expect('without a password: 401, with the browser asked', [r.status, r.headers.get('www-authenticate')], [401, 'Basic realm="Test", charset="UTF-8"']);
+  r = await through('GET', '/basic', { headers: basic('bob', 'wrong-password') });
+  expect('a wrong one: 401', r.status, 401);
+  r = await through('GET', '/basic', { headers: basic('bob', 'bob-password') });
+  expect('the right one goes through, without passing the password on', [r.status, r.json.headers.authorization, r.json.headers['x-consumer']], [200, undefined, 'bob']);
+  r = await through('GET', '/basic', { headers: basic('bob', 'bob-password') });
+  expect('and again, remembered for a while', r.status, 200);
+
+  console.log('\n# plugins in their order');
+  const ordered = await withPlugins('ordered', [
+    { name: 'key-auth', config: { keys: [{ name: 'alice', key: aliceKey }] } },
+    { name: 'request-transformer', config: { renameHeaders: [{ name: 'X-Consumer', value: 'X-User' }] } },
+  ]);
+  r = await through('GET', '/ordered', { headers: { 'X-API-Key': aliceKey } });
+  expect('the key first, then its header renamed', [r.json.headers['x-user'], r.json.headers['x-consumer']], ['alice', undefined]);
+  await api('PUT', `/works/${ordered.id}`, { ...work({ name: 'ordered', path: '/ordered' }), plugins: [...ordered.plugins].reverse() });
+  r = await through('GET', '/ordered', { headers: { 'X-API-Key': aliceKey } });
+  expect('the other way round, nothing was there yet to rename', [r.json.headers['x-user'], r.json.headers['x-consumer']], [undefined, 'alice']);
+  await withPlugins('switched-off', [{ name: 'key-auth', enabled: false, config: { keys: [] } }]);
+  r = await through('GET', '/switched-off');
+  expect('a plugin switched off does nothing', r.status, 200);
+
+  console.log('\n# rate limit per caller');
+  await withPlugins('per-caller', [
+    { name: 'key-auth', config: { keys: [{ name: 'alice', key: aliceKey }, { name: 'bob', key: 'bob-key-0123456789abcdef' }] } },
+    { name: 'rate-limit', config: { perMinute: 1, by: 'consumer' } },
+  ]);
+  const firstAlice = await through('GET', '/per-caller', { headers: { 'X-API-Key': aliceKey } });
+  const secondAlice = await through('GET', '/per-caller', { headers: { 'X-API-Key': aliceKey } });
+  const firstBob = await through('GET', '/per-caller', { headers: { 'X-API-Key': 'bob-key-0123456789abcdef' } });
+  expect('counted per caller the key names', [firstAlice.status, secondAlice.status, firstBob.status], [200, 429, 200]);
+
+  console.log('\n# request and answer changes');
+  await withPlugins('changed', [
+    { name: 'request-transformer', config: {
+      removeHeaders: ['X-Drop'],
+      renameHeaders: [{ name: 'X-Old', value: 'X-New' }],
+      setHeaders: [{ name: 'X-Set', value: 'shlyuz' }],
+      addHeaders: [{ name: 'X-Add', value: 'added' }, { name: 'X-Given', value: 'added' }],
+      removeQuery: ['secret'],
+      setQuery: [{ name: 'v', value: '2' }],
+    } },
+    { name: 'response-transformer', config: {
+      removeHeaders: ['X-From-Destination'],
+      setHeaders: [{ name: 'X-Answer', value: 'changed' }],
+      addHeaders: [{ name: 'Content-Type', value: 'text/plain' }, { name: 'X-Added', value: 'yes' }],
+    } },
+  ]);
+  r = await through('GET', '/changed/x?keep=1&secret=s&v=1', { headers: { 'X-Drop': 'd', 'X-Old': 'o', 'X-Set': 'client', 'X-Given': 'mine' } });
+  expect('headers removed, renamed, set and added', [r.json.headers['x-drop'], r.json.headers['x-old'], r.json.headers['x-new'], r.json.utf8['x-set'], r.json.headers['x-add'], r.json.headers['x-given']], [undefined, undefined, 'o', 'shlyuz', 'added', 'mine']);
+  expect('the query too', r.json.url, '/x?keep=1&v=2');
+  expect("and the answer's headers", [r.headers.get('x-from-destination'), r.headers.get('x-answer'), r.headers.get('content-type'), r.headers.get('x-added')], [null, 'changed', 'application/json', 'yes']);
+  r = await through('GET', '/plain/raw?a=1%2B2&b=x%20y');
+  expect('a query no plugin touches goes on exactly as it came', r.json.url, '/raw?a=1%2B2&b=x%20y');
+
+  console.log('\n# size limit');
+  await withPlugins('small', [{ name: 'request-size-limit', config: { maxKilobytes: 1 } }], { methods: ['POST'] });
+  r = await through('POST', '/small', { body: 'x'.repeat(2000), headers: { 'Content-Type': 'text/plain' } });
+  expect('a body larger than allowed is refused', [r.status, r.json.reason], [413, 'too_large']);
+  r = await through('POST', '/small', { body: 'x'.repeat(500), headers: { 'Content-Type': 'text/plain' } });
+  expect('a smaller one goes through', [r.status, r.json.body.length], [200, 500]);
+  const chunked = (chunks) => new Promise((resolve) => {
+    const request = http.request(`${one.gateway}/small`, { method: 'POST', headers: { 'Content-Type': 'text/plain' } }, (response) => {
+      const parts = [];
+      response.on('data', (part) => parts.push(part));
+      response.on('end', () => resolve({ status: response.statusCode, raw: Buffer.concat(parts).toString() }));
+    });
+    request.on('error', () => resolve({ status: 'error' }));
+    (async () => {
+      for (const chunk of chunks) {
+        if (request.destroyed) return;
+        request.write(chunk);
+        await sleep(20);
+      }
+      request.end();
+    })();
+  });
+  r = await chunked(Array.from({ length: 10 }, () => 'y'.repeat(300)));
+  expect('so is one that does not say its size, counted on its way', [r.status, r.raw.includes('too_large')], [413, true]);
+  r = await chunked(['small ', 'body']);
+  expect('a small one of those goes through', r.status, 200);
+
+  console.log('\n# cache');
+  await withPlugins('cached', [{ name: 'proxy-cache', config: { ttlSeconds: 1 } }], { destination: `${DESTINATION}/nocookie` });
+  const firstGet = await through('GET', '/cached/a');
+  const secondGet = await through('GET', '/cached/a');
+  expect('the first answer is fetched, the second given from the cache', [firstGet.headers.get('x-cache-status'), secondGet.headers.get('x-cache-status'), secondGet.json.served === firstGet.json.served, secondGet.headers.get('age')], ['Miss', 'Hit', true, '0']);
+  r = await through('HEAD', '/cached/a');
+  expect('HEAD is answered from what GET kept', [r.status, r.headers.get('x-cache-status'), r.raw], [200, 'Hit', '']);
+  r = await through('GET', '/cached/b');
+  expect('another path is fetched', r.headers.get('x-cache-status'), 'Miss');
+  r = await through('GET', '/cached/a', { headers: { Authorization: 'Bearer someone-else' } });
+  expect('so is the same path for another caller', [r.headers.get('x-cache-status'), r.json.served === firstGet.json.served], ['Miss', false]);
+  r = await through('POST', '/cached/a', { body: '{}' });
+  expect('other methods go past the cache', r.headers.get('x-cache-status'), 'Bypass');
+  await sleep(1100);
+  r = await through('GET', '/cached/a');
+  expect('after its time, an answer is fetched again', [r.headers.get('x-cache-status'), r.json.served === firstGet.json.served], ['Miss', false]);
+  await withPlugins('cookies', [{ name: 'proxy-cache' }]);
+  await through('GET', '/cookies');
+  r = await through('GET', '/cookies');
+  expect('an answer that sets cookies is never kept', r.headers.get('x-cache-status'), 'Miss');
+
+  console.log('\n# custom plugins');
+  writeFileSync(path.join(pluginsFolder, 'hello.mjs'), `
+    export default {
+      name: 'hello',
+      title: 'Hello',
+      priority: 800,
+      fields: {
+        greeting: { type: 'string', label: 'Greeting', default: 'salom', required: true },
+        requireTeam: { type: 'boolean', label: 'Require X-Team', default: false },
+      },
+      access(ctx, config) {
+        if (config.requireTeam && !ctx.request.header('X-Team')) return ctx.respond(403, { message: 'say which team you are in' });
+        ctx.request.setHeader('X-Greeting', config.greeting);
+        ctx.shared.greeted = ctx.request.path;
+      },
+      async response(ctx, config) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        ctx.response.setHeader('X-Greeted', ctx.shared.greeted + ' ' + ctx.response.status);
+      },
+    };
+  `);
+  writeFileSync(path.join(pluginsFolder, 'thrower.mjs'), `export default { name: 'thrower', access() { throw new Error('nothing works'); } };`);
+  writeFileSync(path.join(pluginsFolder, 'broken.mjs'), 'export default { name: ');
+  writeFileSync(path.join(pluginsFolder, 'impostor.mjs'), `export default { name: 'jwt', access() {} };`);
+  writeFileSync(path.join(pluginsFolder, 'idle.mjs'), `export default { name: 'idle' };`);
+  r = await api('POST', '/plugins/reload');
+  const custom = r.json.plugins.filter((plugin) => !plugin.builtIn);
+  expect('the folder is read again: the plugins found', custom.map((plugin) => [plugin.name, plugin.file, plugin.phases]), [['hello', 'hello.mjs', ['access', 'response']], ['thrower', 'thrower.mjs', ['access']]]);
+  expect('and the files that are not, with why', r.json.errors.map((error) => error.file), ['broken.mjs', 'idle.mjs', 'impostor.mjs']);
+  expect('in words', [r.json.errors[1].message, r.json.errors[2].message], ['plugin "idle" does nothing: give it an access, response or rewrite function', '"jwt" is the name of a built-in plugin']);
+
+  expect("a custom plugin's settings are checked against its fields", await refused([{ name: 'hello', config: { greeting: '' } }]), 400);
+  const greeted = await withPlugins('greeted', [{ name: 'hello', config: { requireTeam: true } }]);
+  expect('and filled in from their defaults', greeted.plugins[0].config, { greeting: 'salom', requireTeam: true });
+  r = await through('GET', '/greeted/x');
+  expect('it can answer the client itself', [r.status, r.json.message], [403, 'say which team you are in']);
+  r = await through('GET', '/greeted/x', { headers: { 'X-Team': 'blue' } });
+  expect('change the request', [r.status, r.json.headers['x-greeting']], [200, 'salom']);
+  expect('and the answer', r.headers.get('x-greeted'), '/greeted/x 200');
+
+  writeFileSync(path.join(pluginsFolder, 'hello.mjs'), readFileSync(path.join(pluginsFolder, 'hello.mjs'), 'utf8').replace("ctx.request.setHeader('X-Greeting', config.greeting);", "ctx.request.setHeader('X-Greeting', config.greeting + '!');"));
+  await api('POST', '/plugins/reload');
+  r = await through('GET', '/greeted/x', { headers: { 'X-Team': 'blue' } });
+  expect('a changed file is used once the folder is read again', r.json.headers['x-greeting'], 'salom!');
+
+  await withPlugins('throws', [{ name: 'thrower' }]);
+  r = await through('GET', '/throws');
+  expect('a plugin that throws makes it a 500, saying which', [r.status, r.json.reason, r.json.plugin, r.json.message], [500, 'plugin', 'thrower', 'plugin "thrower" failed: nothing works']);
+
+  const notHere = await withPlugins('not-here', [{ name: 'not-installed', config: { anything: 1 } }]);
+  expect('a plugin this computer lacks is kept in the work', notHere.plugins, [{ name: 'not-installed', enabled: true, config: { anything: 1 } }]);
+  r = await through('GET', '/not-here');
+  expect('which then lets nothing through', [r.status, r.json.reason], [500, 'plugin_missing']);
+  await api('PUT', `/works/${notHere.id}`, { ...work({ name: 'not-here', path: '/not-here' }), plugins: [{ name: 'not-installed', enabled: false }] });
+  r = await through('GET', '/not-here');
+  expect('until it is switched off', r.status, 200);
+
+  console.log('\n# works kept from before plugins');
+  const folderThree = path.join(scratch, 'three');
+  mkdirSync(folderThree, { recursive: true });
+  const oldProject = '11111111-1111-4111-8111-111111111111';
+  writeFileSync(path.join(folderThree, 'data.json'), JSON.stringify({
+    format: 1,
+    projects: [{ id: oldProject, name: 'old', tokenFields: [], createdAt: '2026-10-01T00:00:00.000Z' }],
+    works: [{
+      id: '22222222-2222-4222-8222-222222222222', projectId: oldProject, name: 'legacy', path: '/legacy', methods: [], destination: DESTINATION,
+      stripPath: true, timeoutSeconds: 30, headers: [{ name: 'X-Fixed', value: 'yes' }],
+      token: { enabled: true, header: 'Authorization', claims: [{ claim: 'sub', header: 'X-User', required: false }], payloadHeader: '', forwardToken: true, strict: true, conditions: [], verify: { enabled: false, secretId: '', checkExpiry: true, leeway: 0, issuer: '', audience: '' } },
+      requestId: { enabled: false, header: 'X-Request-Id', echo: true },
+      tracing: { enabled: false, samplingPercent: 100, body: false },
+      rateLimit: { enabled: false, perMinute: 60, by: 'ip', header: '' },
+      cors: { enabled: true, origins: ['*'], credentials: false },
+      createdAt: '2026-10-01T00:00:00.000Z',
+    }],
+    secrets: [],
+    adminPassword: null,
+  }));
+  const three = await engineOn('three', 18300, 18301);
+  try {
+    const kept = JSON.parse(readFileSync(three.dataFile, 'utf8')).works[0];
+    expect('they are turned into plugins, in the order things used to run', [kept.plugins.map((plugin) => [plugin.name, plugin.enabled]), kept.token, kept.plugins[2].config.setHeaders], [[['cors', true], ['jwt', true], ['request-transformer', true]], undefined, [{ name: 'X-Fixed', value: 'yes' }]]);
+    expect('with the file as it was kept beside it', JSON.parse(readFileSync(`${three.dataFile}.before-plugins`, 'utf8')).works[0].token.enabled, true);
+    r = await call(three.gateway, 'GET', '/legacy');
+    expect('and do what they did: no token, no entry', r.status, 401);
+    r = await call(three.gateway, 'GET', '/legacy', undefined, { Authorization: `Bearer ${unsigned({ sub: 'u1' })}` });
+    expect('a token lets in, its field forwarded, the fixed header set', [r.status, r.json.headers['x-user'], r.json.headers['x-fixed']], [200, 'u1', 'yes']);
+  } finally {
+    await three.engine.stop();
+  }
+
+  r = await toTwoLater('POST', '/projects/import', {
+    konggate: 1,
+    project: { name: `from-before-${suffix}` },
+    works: [{ name: 'old-file', path: '/old-file', methods: [], destination: DESTINATION, token: { enabled: true, strict: false }, cors: { enabled: true, origins: ['*'] } }],
+    secrets: [],
+  });
+  expect('a project file from before plugins is imported', r.status, 201);
+  const importedOld = (await toTwoLater('GET', '/works')).json.find((item) => item.name === 'old-file');
+  expect('its works turned into plugins', importedOld.plugins.map((plugin) => plugin.name), ['cors', 'jwt']);
+  r = await toTwoLater('POST', '/projects/import', { konggate: 2, project: { name: `needs-${suffix}` }, works: [{ name: 'needs', path: '/needs', destination: DESTINATION, plugins: [{ name: 'someone-elses' }] }] });
+  expect('an import says which plugins this computer lacks', [r.status, r.json.missingPlugins], [201, ['someone-elses']]);
+
   console.log('\n# settings changed while running');
   r = await api('PUT', '/settings', { gateway: { port: 18150, public: false } });
   expect('the gateway moves to another port', [r.status, r.json.gateway.port, r.json.gateway.running], [200, 18150, true]);
@@ -606,10 +864,15 @@ try {
   c = await cli(['works', `test-${suffix}`]);
   expect('and a project\'s works, with what verifies their tokens', [c.code, c.out.includes('/verified'), c.out.includes(`verified: hs-${suffix}-renamed`)], [0, true, true]);
 
+  c = await cli(['plugins']);
+  expect('plugins lists the built-in ones and the folder\'s', [c.code, c.out.includes('key-auth'), c.out.includes('hello.mjs'), c.out.includes('NOT USED  broken.mjs')], [0, true, true, true]);
+  c = await cli(['works', `test-${suffix}`]);
+  expect('and works say which plugins they use, in order', [c.out.includes('request-transformer, key-auth'), c.out.includes('key-auth, rate-limit')], [true, true]);
+
   const exportedTo = path.join(scratch, 'from-cli.json');
   c = await cli(['export', `test-${suffix}`, exportedTo]);
   const written = JSON.parse(readFileSync(exportedTo, 'utf8'));
-  expect('export writes the project to a file', [c.code, written.project.name, written.works.length, readFileSync(exportedTo, 'utf8').includes('new secret')], [0, `test-${suffix}`, exported.works.length, false]);
+  expect('export writes the project to a file', [c.code, written.project.name, written.works.length, readFileSync(exportedTo, 'utf8').includes('new secret')], [0, `test-${suffix}`, (await api('GET', '/works')).json.filter((item) => item.projectId === projectId).length, false]);
   c = await cli(['import', exportedTo]);
   expect('import adds it back under another name, and says what clashes', [c.code, c.out.includes(`"test-${suffix} (2)"`), c.out.includes('answered by two works')], [0, true, true]);
   r = await api('GET', '/projects');
@@ -716,8 +979,8 @@ try {
     expect('a value replaced on one computer reaches the other by itself', rotated, 200);
 
     r = await toTwo('GET', `/projects/${projectTwo.id}/export`);
-    expect('an export names the shared secret, and holds no value', [r.json.works[0].token.verify.secret, r.json.secrets, r.raw.includes('rotated secret')], ['shared-hs', [{ name: 'shared-hs', algorithm: 'HS256' }], false]);
-    r = await toTwo('POST', '/projects/import', { ...r.json, project: { name: `again-${suffix}` }, works: [{ ...r.json.works[0], path: '/again', token: { enabled: true, verify: { enabled: true, secret: 'not-there-yet' } } }], secrets: [{ name: 'not-there-yet', algorithm: 'RS256' }] });
+    expect('an export names the shared secret, and holds no value', [r.json.works[0].plugins.find((plugin) => plugin.name === 'jwt').config.verify.secret, r.json.secrets, r.raw.includes('rotated secret')], ['shared-hs', [{ name: 'shared-hs', algorithm: 'HS256' }], false]);
+    r = await toTwo('POST', '/projects/import', { ...r.json, project: { name: `again-${suffix}` }, works: [{ ...r.json.works[0], path: '/again', plugins: [{ name: 'jwt', enabled: true, config: { verify: { enabled: true, secret: 'not-there-yet' } } }] }], secrets: [{ name: 'not-there-yet', algorithm: 'RS256' }] });
     expect('an import naming a secret the database lacks leaves a place for it there', [r.status, r.json.missingSecrets], [201, [{ name: 'not-there-yet', algorithm: 'RS256' }]]);
     r = await api('GET', '/secrets');
     expect('which every computer sees waiting for its value', r.json.map((secret) => [secret.name, secret.hasValue]), [['not-there-yet', false], ['shared-hs', true]]);

@@ -12,11 +12,13 @@ import path from 'node:path';
 import { createApi } from './api.mjs';
 import { compileWorks, createGateway } from './gateway.mjs';
 import { keyOf } from './jwt.mjs';
+import { createPluginRegistry } from './plugins/index.mjs';
 import { createRequestsLog } from './requests-log.mjs';
 import { describeConnectionError, openSecretsDatabase, tryConnection } from './secrets-db.mjs';
 import { createSessions } from './sessions.mjs';
 import { createSettingsStore, normalized } from './settings.mjs';
 import { Refusal, openStore } from './store.mjs';
+import { migratedWork } from './works.mjs';
 
 // How often the database is asked whether another computer changed a secret.
 const SYNC_MS = 3000;
@@ -69,6 +71,10 @@ const close = (server) => new Promise((resolve) => {
  * - `hasWindow`: whether there is a window whose close button has a meaning to choose.
  * - `version`, `buildDate`: which release this is, and the day it was built
  *   (`YYYY-MM-DD`; null in a checkout, which nobody built).
+ * - `pluginsDir`: the folder custom plugins are read from; beside the data
+ *   file unless given.
+ * - `openFolder`: shows a folder to the user (the desktop app has a window to
+ *   do it with; `serve` has not).
  */
 export async function startEngine({
   settingsFile,
@@ -81,11 +87,22 @@ export async function startEngine({
   report = console.error,
   quit,
   hasWindow = false,
+  pluginsDir = path.join(path.dirname(dataFile), 'plugins'),
+  openFolder,
 }) {
   const settingsStore = createSettingsStore(settingsFile, vault);
   let settings = settingsStore.load();
 
-  const store = openStore(dataFile, vault);
+  // The plugins first: works kept from before plugins are turned into them.
+  const plugins = createPluginRegistry({ dir: pluginsDir });
+  try {
+    await plugins.load();
+  } catch (error) {
+    // A folder that cannot be read leaves the built-in plugins.
+    report(error);
+  }
+
+  const store = openStore(dataFile, vault, { migrate: (work) => migratedWork(work, plugins, report) });
   const log = createRequestsLog();
   const sessions = createSessions();
 
@@ -180,7 +197,9 @@ export async function startEngine({
   const gateway = createGateway({
     getWorks: () => works,
     getSecret: (id) => secrets.get(id),
+    getPlugin: (name) => plugins.get(name),
     log,
+    report,
   });
 
   // A mistake in handling one request must not take the others down with it.
@@ -265,6 +284,16 @@ export async function startEngine({
     reload,
     quit,
     gateway: guarded(gateway.handle),
+
+    plugins: {
+      registry: plugins,
+      /** Reads the plugins folder again; works using a changed plugin pick it up. */
+      async reload() {
+        await plugins.load();
+        works = compileWorks(store.works());
+      },
+      openFolder: openFolder ? () => openFolder(pluginsDir) : null,
+    },
 
     status: () => ({
       version,

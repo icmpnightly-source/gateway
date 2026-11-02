@@ -271,6 +271,11 @@ if (!app.requestSingleInstanceLock()) {
         quit: () => void quit(),
         // The screens offer the choice of what closing the window does.
         hasWindow: true,
+        // "Open folder" on the plugins' settings.
+        openFolder: async (folder) => {
+          const failure = await shell.openPath(folder);
+          if (failure) throw new Error(failure);
+        },
       });
     } catch (error) {
       report(error);

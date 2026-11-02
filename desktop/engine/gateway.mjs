@@ -1,15 +1,14 @@
 // The gateway itself: takes a client's request, finds the work it belongs to,
-// does to it what the work says, and forwards it to the work's destination.
+// passes it through the work's plugins in their order, and forwards it to the
+// work's destination; the destination's answer goes back through them too.
 //
-// For each request, in this order: answer a browser's CORS preflight; read and
-// check the token; count it against the request limit; set the fixed headers;
-// give it a request id; forward it.
+// What each plugin does is in plugins/; here is what they share: the request
+// as it will be sent, the headers every answer gets, and the answer itself.
 
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import { brotliDecompressSync, constants as zlib, gunzipSync, inflateSync } from 'node:zlib';
-import { bearerToken, decodedClaims, findClaim, meets, toHeaderValue, verifiedClaims } from './jwt.mjs';
 
 /** Response header a recorded request's id comes back in. */
 export const TRACE_ID_HEADER = 'X-Trace-Id';
@@ -25,12 +24,13 @@ const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'te', 'trailer', 'transf
 // Whose values never go into the requests log.
 const ALWAYS_MASKED = ['authorization', 'proxy-authorization', 'cookie', 'set-cookie', 'x-api-key', 'apikey'];
 
-const PREFLIGHT_METHODS = 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS';
-// How long a browser may go by an answer to its preflight before asking again.
-const PREFLIGHT_SECONDS = 600;
-// The headers the gateway puts on an answer, for a page to be able to read
-// them where "*" cannot say so (an answer that allows credentials).
-const OWN_HEADERS = ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'Retry-After'];
+// The longest a plugin is given for one step of one request.
+const PLUGIN_SECONDS = 10;
+// How often what plugins keep between requests (counters, a cache) is tidied.
+const SWEEP_MS = 60000;
+
+const HEADER = /^[A-Za-z0-9_-]+$/;
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
 // Enough to tell values apart without turning the log into a copy of the traffic.
 const MAX_LOGGED_VALUE = 1024;
@@ -57,6 +57,13 @@ function getHeader(list, name) {
   const wanted = name.toLowerCase();
   const values = list.filter(([key]) => key.toLowerCase() === wanted).map(([, value]) => value);
   return values.length > 0 ? values.join(', ') : undefined;
+}
+
+function checkedHeader(name, value) {
+  if (!HEADER.test(String(name))) throw new TypeError(`"${name}" is not a header name`);
+  const text = String(value);
+  if (CONTROL.test(text)) throw new TypeError(`the value of ${name} has to be on one line`);
+  return wire(text);
 }
 
 function removeHeader(list, name) {
@@ -198,43 +205,99 @@ export function upstreamPathOf(work, base, pathname, search) {
 
 // --- the gateway --------------------------------------------------------------
 
+/** A plugin that threw, or took too long: the request is answered 500. */
+class PluginFailure extends Error {
+  constructor(plugin, cause) {
+    super(`plugin "${plugin}" failed: ${cause?.message ?? cause}`);
+    this.plugin = plugin;
+    this.cause = cause;
+  }
+}
+
+function withinTime(promise, plugin) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`took longer than ${PLUGIN_SECONDS} s`)), PLUGIN_SECONDS * 1000);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /**
- * `getWorks` and `getSecret` give the current configuration; `log` is where
- * recorded requests go.
+ * `getWorks` and `getSecret` give the current configuration, `getPlugin` a
+ * plugin by name; `log` is where recorded requests go, `report` where a
+ * plugin's mistakes are written down.
  */
-export function createGateway({ getWorks, getSecret, log }) {
-  // Requests counted per work and client, within the current minute.
-  const counters = new Map();
-  const sweep = setInterval(() => {
-    const minute = Math.floor(Date.now() / 60000);
-    for (const [key, counter] of counters) {
-      if (counter.minute !== minute) counters.delete(key);
+export function createGateway({ getWorks, getSecret, getPlugin, log, report = console.error }) {
+  // What a work's plugin keeps between requests, made by its `prepare`: kept
+  // while the work keeps that plugin with the same settings.
+  const states = new Map();
+  let builtFor = null;
+  let pipelines = new Map();
+
+  function prepared(work, instance, definition) {
+    const key = `${work.id}\n${instance.name}\n${JSON.stringify(instance.config)}`;
+    const known = states.get(key);
+    if (known && known.definition === definition) return { key, ...known };
+
+    let made = { definition, state: undefined, error: undefined };
+    try {
+      if (definition.prepare) made.state = definition.prepare(instance.config, { work });
+    } catch (error) {
+      made = { definition, state: undefined, error };
     }
-  }, 60000);
-  sweep.unref();
-
-  function count(work, identity) {
-    const now = Date.now();
-    const minute = Math.floor(now / 60000);
-    const key = `${work.id}\n${identity}`;
-
-    let counter = counters.get(key);
-    if (!counter || counter.minute !== minute) {
-      counter = { minute, count: 0 };
-      counters.set(key, counter);
-    }
-    counter.count += 1;
-
-    const limit = work.rateLimit.perMinute;
-    return {
-      limit,
-      allowed: counter.count <= limit,
-      remaining: Math.max(0, limit - counter.count),
-      reset: Math.ceil(((minute + 1) * 60000 - now) / 1000),
-    };
+    states.set(key, made);
+    return { key, ...made };
   }
 
-  function handle(req, res) {
+  // Each work's plugins as they run: those switched on, those this computer
+  // lacks, and what the requests log must not show.
+  function pipelineOf(work) {
+    const works = getWorks();
+    if (works !== builtFor) {
+      const used = new Set();
+      pipelines = new Map();
+      for (const each of works) {
+        const steps = [];
+        const missing = [];
+        const masked = new Set(ALWAYS_MASKED);
+        const maskedQuery = new Set();
+        for (const instance of each.plugins ?? []) {
+          if (!instance.enabled) continue;
+          const definition = getPlugin(instance.name);
+          if (!definition) {
+            missing.push(instance.name);
+            continue;
+          }
+          const { key, state, error } = prepared(each, instance, definition);
+          used.add(key);
+          steps.push({ name: instance.name, definition, config: instance.config, state, error });
+          for (const name of definition.secretHeaders?.(instance.config) ?? []) masked.add(name.toLowerCase());
+          for (const name of definition.secretQuery?.(instance.config) ?? []) maskedQuery.add(name);
+        }
+        pipelines.set(each.id, { steps, missing, masked, maskedQuery });
+      }
+      for (const key of states.keys()) if (!used.has(key)) states.delete(key);
+      builtFor = works;
+    }
+    return pipelines.get(work.id) ?? { steps: [], missing: [], masked: new Set(ALWAYS_MASKED), maskedQuery: new Set() };
+  }
+
+  const sweep = setInterval(() => {
+    for (const { state } of states.values()) {
+      try {
+        state?.sweep?.();
+      } catch (error) {
+        report(error);
+      }
+    }
+  }, SWEEP_MS);
+  sweep.unref();
+
+  const env = { secret: (id) => getSecret(id), report };
+
+  async function handle(req, res) {
     const startedAt = Date.now();
     const queryAt = req.url.indexOf('?');
     const pathname = queryAt === -1 ? req.url : req.url.slice(0, queryAt);
@@ -254,20 +317,68 @@ export function createGateway({ getWorks, getSecret, log }) {
     // What the requests log will say, when this request is recorded.
     let record = null;
 
+    // The request body goes to the log, if it is recorded, from the moment it
+    // starts to flow: to the destination, or away when nothing is sent.
+    let bodyReleased = false;
+    function releaseBody() {
+      if (bodyReleased) return;
+      bodyReleased = true;
+      if (record && work.tracing.body) {
+        captureBody(req, (name) => getHeader(incoming, name), (body) => {
+          record.in.body = record.scrub(body);
+        });
+      }
+    }
+
     function answer(status, body, headers = []) {
-      const text = JSON.stringify(body);
-      const payload = Buffer.from(text);
+      let payload;
+      let type;
+      if (body === null || body === undefined) {
+        payload = Buffer.alloc(0);
+      } else if (Buffer.isBuffer(body)) {
+        payload = body;
+      } else if (typeof body === 'string') {
+        payload = Buffer.from(body, 'utf8');
+        type = 'text/plain; charset=utf-8';
+      } else {
+        payload = Buffer.from(JSON.stringify(body), 'utf8');
+        type = 'application/json; charset=utf-8';
+      }
+
+      // Ours win over what was given where both name the same header.
+      const ours = new Set(extra.map(([name]) => name.toLowerCase()));
+      const given = headers.filter(([name]) => {
+        const key = name.toLowerCase();
+        return !ours.has(key) && key !== 'content-length' && !HOP_BY_HOP.has(key);
+      });
+      const hasType = given.some(([name]) => name.toLowerCase() === 'content-type');
       const sent = [
-        'Content-Type', 'application/json; charset=utf-8',
+        ...(type && !hasType ? ['Content-Type', type] : []),
         'Content-Length', String(payload.length),
-        ...headers.flat(),
+        ...given.flat(),
         ...extra.flat(),
       ];
-      if (record) record.answer = { by: 'gateway', headers: loggedHeaders(headersFrom(sent), record.redact), body: text };
+      if (record) {
+        const kind = type ?? getHeader(given, 'content-type');
+        record.answer = {
+          by: 'gateway',
+          headers: loggedHeaders(headersFrom(sent), record.redact),
+          ...(payload.length > 0 && isText(kind)
+            ? { body: record.scrub(shorten(bodyText(payload, getHeader(given, 'content-encoding')) ?? '', MAX_LOGGED_BODY)) }
+            : {}),
+        };
+      }
 
       res.writeHead(status, sent);
       res.end(req.method === 'HEAD' ? undefined : payload);
     }
+
+    const refuse = (status, body, headers, note) => {
+      if (record) record.out.note = note ?? `nothing sent: the gateway answered ${status} itself`;
+      releaseBody();
+      req.resume();
+      answer(status, body, headers);
+    };
 
     if (!work) {
       // Read to the end, so the connection can be used again.
@@ -276,9 +387,17 @@ export function createGateway({ getWorks, getSecret, log }) {
       return;
     }
 
+    const pipeline = pipelineOf(work);
+
     const recorded = work.tracing.enabled && Math.random() * 100 < work.tracing.samplingPercent;
     if (recorded) {
-      const redact = new Set([...ALWAYS_MASKED, work.token.header.toLowerCase()]);
+      const redact = pipeline.masked;
+      let shownUrl = req.url;
+      if (pipeline.maskedQuery.size > 0 && search) {
+        const query = new URLSearchParams(search);
+        for (const name of pipeline.maskedQuery) if (query.has(name)) query.set(name, '***');
+        shownUrl = `${pathname}?${query.toString()}`;
+      }
       record = {
         id: randomBytes(16).toString('hex'),
         time: new Date(startedAt).toISOString(),
@@ -288,7 +407,7 @@ export function createGateway({ getWorks, getSecret, log }) {
         redact,
         in: {
           method: req.method,
-          url: `${scheme}://${getHeader(incoming, 'host') ?? ''}${req.url}`,
+          url: `${scheme}://${getHeader(incoming, 'host') ?? ''}${shownUrl}`,
           clientIp,
           headers: loggedHeaders(incoming, redact),
         },
@@ -306,12 +425,6 @@ export function createGateway({ getWorks, getSecret, log }) {
         .sort((a, b) => b.length - a.length);
       record.scrub = (text) => hidden.reduce((result, value) => result.split(value).join('***'), text);
 
-      if (work.tracing.body) {
-        captureBody(req, (name) => getHeader(incoming, name), (body) => {
-          record.in.body = record.scrub(body);
-        });
-      }
-
       res.once('close', () => {
         const { redact: _redact, scrub: _scrub, ...entry } = record;
         log.add({
@@ -323,169 +436,162 @@ export function createGateway({ getWorks, getSecret, log }) {
       });
     }
 
-    const refuse = (status, body, headers) => {
-      if (record) record.out.note = `nothing sent: the gateway answered ${status} itself`;
-      req.resume();
-      answer(status, body, headers);
-    };
-    const unauthorized = (reason) =>
-      refuse(401, { message: `Unauthorized: ${reason}`, reason: 'token' }, [['WWW-Authenticate', 'Bearer']]);
-
-    // --- CORS -----------------------------------------------------------------
-
-    if (work.cors.enabled && origin) {
-      const { origins, credentials } = work.cors;
-      const any = origins.includes('*');
-
-      const isAllowed = any || origins.includes(origin);
-      if (isAllowed) {
-        // A browser refuses "*" together with credentials, so the caller is named.
-        extra.push(['Access-Control-Allow-Origin', any && !credentials ? '*' : origin]);
-        if (credentials) extra.push(['Access-Control-Allow-Credentials', 'true']);
-      }
-      if (!any || credentials) extra.push(['Vary', 'Origin']);
-
-      if (preflightFor) {
-        const wanted = getHeader(incoming, 'access-control-request-headers');
-        const allowed = [['Access-Control-Allow-Methods', work.methods.length > 0 ? work.methods.join(',') : PREFLIGHT_METHODS]];
-        if (wanted) allowed.push(['Access-Control-Allow-Headers', wanted]);
-        if (isAllowed) {
-          allowed.push(['Access-Control-Max-Age', String(PREFLIGHT_SECONDS)]);
-          // A page from a less private address calling one on the LAN is asked
-          // about first, by browsers that do so.
-          if (getHeader(incoming, 'access-control-request-private-network') === 'true') {
-            allowed.push(['Access-Control-Allow-Private-Network', 'true']);
-          }
-        }
-
-        const sent = ['Content-Length', '0', ...allowed.flat(), ...extra.flat()];
-        if (record) {
-          record.out.note = 'nothing sent: the gateway answered the browser\'s preflight itself';
-          record.answer = { by: 'gateway', headers: loggedHeaders(headersFrom(sent), record.redact) };
-        }
-        req.resume();
-        res.writeHead(200, sent);
-        res.end();
-        return;
-      }
-
-      // Otherwise a page could not read the headers the gateway adds: the
-      // request's id, what is left of the limit.
-      if (isAllowed) {
-        const own = [...OWN_HEADERS, TRACE_ID_HEADER, ...(work.requestId.enabled ? [work.requestId.header] : [])];
-        extra.push(['Access-Control-Expose-Headers', credentials ? own.join(', ') : '*']);
-      }
+    // A plugin switched on in the work but not on this computer: nothing
+    // goes through, rather than a sign-in plugin silently left out.
+    if (pipeline.missing.length > 0) {
+      const [name] = pipeline.missing;
+      refuse(500, { message: `plugin "${name}" is not installed on this computer`, reason: 'plugin_missing', plugin: name });
+      return;
     }
 
-    // With CORS off the gateway keeps out of it: a browser's preflight goes to
-    // the destination as it came, for the destination to answer as it does.
-    // It never carries a token, so the token and the limit are not asked of it.
-    const passesPreflight = Boolean(preflightFor) && !work.cors.enabled;
+    // --- what the plugins are given ---------------------------------------------
 
     // What the destination will be sent; starts as what the client sent.
     const outgoing = headersFrom(req.rawHeaders);
+    const query = new URLSearchParams(search);
+    let bodyLimit = null;
+    let ended = null;
+    let phase = 'rewrite';
+    // In the response step: the destination's answer as it will go back.
+    let answerHeaders = null;
+    let destinationHeaders = null;
+    let answerStatus;
+    const bodyWatchers = [];
 
-    // --- the token ------------------------------------------------------------
+    const onlyInResponse = (what) => {
+      if (phase !== 'response') throw new Error(`ctx.response.${what} is only there in the response step`);
+    };
 
-    if (work.token.enabled && !passesPreflight) {
-      const { token: settings } = work;
-      const token = bearerToken(getHeader(incoming, settings.header));
+    const ctx = {
+      work: { id: work.id, name: work.name, path: work.path, methods: [...work.methods], projectId: work.projectId },
+      client: { ip: clientIp },
+      request: {
+        method: req.method,
+        path: pathname,
+        query,
+        preflightFor,
+        header: (name) => {
+          const value = getHeader(outgoing, name);
+          return value === undefined ? undefined : unwire(value);
+        },
+        incomingHeader: (name) => {
+          const value = getHeader(incoming, name);
+          return value === undefined ? undefined : unwire(value);
+        },
+        headers: () => outgoing.map(([name, value]) => [name, unwire(value)]),
+        setHeader: (name, value) => setHeader(outgoing, name, checkedHeader(name, value)),
+        addHeader: (name, value) => void outgoing.push([name, checkedHeader(name, value)]),
+        removeHeader: (name) => removeHeader(outgoing, name),
+        // The most a body may hold, counted as it goes through.
+        limitBody: (maxBytes, message) => {
+          bodyLimit = { maxBytes, message: message ?? 'the request body is too large' };
+        },
+      },
+      response: {
+        get status() {
+          return answerStatus;
+        },
+        header: (name) => {
+          const value = getHeader(phase === 'response' ? answerHeaders : extra, name);
+          return value === undefined ? undefined : unwire(value);
+        },
+        setHeader: (name, value) => setHeader(phase === 'response' ? answerHeaders : extra, name, checkedHeader(name, value)),
+        removeHeader: (name) => removeHeader(phase === 'response' ? answerHeaders : extra, name),
+        destinationHeaders: () => {
+          onlyInResponse('destinationHeaders()');
+          return destinationHeaders.map(([name, value]) => [name, value]);
+        },
+        // The destination's whole body, once it has gone through; null when
+        // it was larger than `maxBytes` or broke off.
+        onBody: (callback, { maxBytes = 1024 * 1024 } = {}) => {
+          onlyInResponse('onBody()');
+          bodyWatchers.push({ callback, maxBytes });
+        },
+      },
+      consumer: null,
+      setConsumer(id) {
+        ctx.consumer = id === null || id === undefined ? null : String(id);
+      },
+      shared: {},
+      respond(status, body, headers = []) {
+        if (phase === 'response') throw new Error('ctx.respond() is for the rewrite and access steps');
+        if (!Number.isInteger(status) || status < 100 || status > 599) throw new TypeError(`${status} is not an answer code`);
+        ended = { status, body, headers: headers.map(([name, value]) => [name, checkedHeader(name, value)]) };
+      },
+      answerPreflight(headers) {
+        ended = { status: 200, body: null, headers, note: "nothing sent: the gateway answered the browser's preflight itself" };
+      },
+      log: (message) => report(`plugin on work "${work.name}": ${message}`),
+    };
 
-      // These headers are ours to set: whatever the client put in them is
-      // dropped, so the destination never sees a value that didn't come from
-      // the token.
-      for (const mapping of settings.claims) removeHeader(outgoing, mapping.header);
-      if (settings.payloadHeader) removeHeader(outgoing, settings.payloadHeader);
-
-      let claims;
-      let encoded;
-      let reason;
-      if (token) {
-        const read = settings.verify.enabled
-          ? verifiedClaims(token, getSecret(settings.verify.secretId), settings.verify)
-          : decodedClaims(token);
-
-        if (read.claims) {
-          ({ claims, encoded } = read);
-        } else {
-          ({ reason } = read);
-          // A token that fails verification is never let through, strict or not.
-          if (settings.verify.enabled) return unauthorized(reason);
-        }
+    async function run(step, stepPhase) {
+      const call = step.definition[stepPhase];
+      if (!call) return;
+      if (step.error) throw new PluginFailure(step.name, step.error);
+      phase = stepPhase === 'preflight' ? 'access' : stepPhase;
+      try {
+        const result = call.call(step.definition, ctx, step.config, step.state, env);
+        if (result && typeof result.then === 'function') await withinTime(result, step.name);
+      } catch (error) {
+        throw new PluginFailure(step.name, error);
       }
+    }
 
-      if (!claims) {
-        // No token, or (unverified) nothing readable in it. A work gated on
-        // token fields cannot be entered without them.
-        if (settings.strict || settings.conditions.length > 0) return unauthorized(reason ?? 'token is missing');
+    function failed(error) {
+      report(error.cause ?? error);
+      const body = { message: error.message, reason: 'plugin', plugin: error.plugin };
+      if (res.headersSent) return void res.destroy();
+      refuse(500, body);
+    }
+
+    // A browser's preflight carries no token: the plugins are not asked about
+    // it. With CORS on the work, the gateway answers it; without, it goes to
+    // the destination as it came, through the plugins that ask to see it.
+    const corsStep = preflightFor ? pipeline.steps.find((step) => step.definition.preflight) : undefined;
+    const steps = preflightFor && !corsStep ? pipeline.steps.filter((step) => step.definition.onPreflight) : pipeline.steps;
+
+    try {
+      if (corsStep) {
+        await run(corsStep, 'rewrite');
+        await run(corsStep, 'preflight');
       } else {
-        for (const condition of settings.conditions) {
-          if (!meets(findClaim(claims, condition.claim), condition.values)) {
-            return refuse(403, {
-              message: `Forbidden: token '${condition.claim}' does not allow this request`,
-              reason: 'condition',
-            });
+        for (const step of steps) {
+          await run(step, 'rewrite');
+          if (ended) break;
+        }
+        if (!ended) {
+          for (const step of steps) {
+            await run(step, 'access');
+            if (ended) break;
           }
         }
-
-        for (const mapping of settings.claims) {
-          const value = toHeaderValue(findClaim(claims, mapping.claim));
-          if (value !== undefined) {
-            setHeader(outgoing, mapping.header, wire(value));
-          } else if (mapping.required) {
-            return unauthorized(`token has no usable '${mapping.claim}' claim`);
-          }
-        }
-
-        if (settings.payloadHeader) setHeader(outgoing, settings.payloadHeader, encoded);
       }
-
-      if (!settings.forwardToken) removeHeader(outgoing, settings.header);
+    } catch (error) {
+      if (error instanceof PluginFailure) return void failed(error);
+      throw error;
     }
 
-    // --- the request limit ----------------------------------------------------
+    // The client went away while the plugins were at it.
+    if (res.destroyed) return;
 
-    if (work.rateLimit.enabled && !passesPreflight) {
-      const { by, header } = work.rateLimit;
-      // Counted after the token was read, so a header filled from it counts
-      // per token user. A request without the header is counted by address.
-      const identity = (by === 'header' && header && getHeader(outgoing, header)) || clientIp;
-      const counted = count(work, identity);
-
-      extra.push(
-        ['RateLimit-Limit', String(counted.limit)],
-        ['RateLimit-Remaining', String(counted.remaining)],
-        ['RateLimit-Reset', String(counted.reset)],
-      );
-      if (!counted.allowed) {
-        return refuse(429, { message: 'request limit exceeded', reason: 'rate_limit' }, [['Retry-After', String(counted.reset)]]);
-      }
-    }
-
-    // --- fixed headers and the request id -------------------------------------
-
-    for (const { name, value } of work.headers) setHeader(outgoing, name, wire(value));
-
-    if (work.requestId.enabled) {
-      const { header, echo } = work.requestId;
-      // An id the client already sent is kept.
-      let id = getHeader(outgoing, header);
-      if (!id) {
-        id = randomUUID();
-        setHeader(outgoing, header, id);
-      }
-      if (echo) extra.push([header, id]);
+    if (ended) {
+      refuse(ended.status, ended.body, ended.headers, ended.note);
+      return;
     }
 
     // --- forwarding -----------------------------------------------------------
 
     const { base } = work;
     if (!base) {
-      return refuse(502, { message: "the work's destination is not a usable address", reason: 'bad_destination' });
+      refuse(502, { message: "the work's destination is not a usable address", reason: 'bad_destination' });
+      return;
     }
 
     const prefix = work.path === '/' ? '' : work.path;
-    const upstreamPath = upstreamPathOf(work, base, pathname, search);
+    // The query as the client wrote it, unless a plugin changed it.
+    const changedQuery = query.toString();
+    const sentSearch = changedQuery === new URLSearchParams(search).toString() ? search : changedQuery ? `?${changedQuery}` : '';
+    const upstreamPath = upstreamPathOf(work, base, pathname, sentSearch);
 
     const forwardedFor = getHeader(incoming, 'x-forwarded-for');
     const host = getHeader(incoming, 'host') ?? '';
@@ -541,37 +647,47 @@ export function createGateway({ getWorks, getSecret, log }) {
     // Silence on the connection for this long, before the answer or in the middle of it.
     upstream.setTimeout(work.timeoutSeconds * 1000, () => upstream.destroy(timeoutError('KG_RESPONSE_TIMEOUT')));
 
-    upstream.once('response', (answered) => {
+    upstream.once('response', async (answered) => {
       if (record) {
         record.out.status = answered.statusCode;
         record.out.response = {
           status: answered.statusCode,
           headers: loggedHeaders(headersFrom(answered.rawHeaders), record.redact),
         };
+      }
+
+      destinationHeaders = headersFrom(answered.rawHeaders).filter(([name]) => !HOP_BY_HOP.has(name.toLowerCase()));
+      // Ours win over the destination's where both set the same header.
+      const ours = new Set(extra.map(([name]) => name.toLowerCase()));
+      answerHeaders = [
+        ...destinationHeaders.filter(([name]) => !ours.has(name.toLowerCase())),
+        ['Via', '1.1 konggate'],
+        ...extra,
+      ];
+      answerStatus = answered.statusCode;
+
+      try {
+        for (const step of steps) await run(step, 'response');
+      } catch (error) {
+        answered.destroy();
+        if (error instanceof PluginFailure) return void failed(error);
+        report(error);
+        return void res.destroy();
+      }
+      if (res.destroyed) return void answered.destroy();
+
+      if (record) {
         if (work.tracing.body) {
           captureBody(answered, (name) => answered.headers[name], (body) => {
             record.out.response.body = record.scrub(body);
           });
         }
+        record.answer = { by: 'destination', headers: loggedHeaders(answerHeaders, record.redact) };
       }
 
-      const headers = [];
-      for (let index = 0; index < answered.rawHeaders.length; index += 2) {
-        if (!HOP_BY_HOP.has(answered.rawHeaders[index].toLowerCase())) {
-          headers.push(answered.rawHeaders[index], answered.rawHeaders[index + 1]);
-        }
-      }
-      // Ours win over the destination's where both set the same header.
-      const ours = new Set(extra.map(([name]) => name.toLowerCase()));
-      const kept = [];
-      for (let index = 0; index < headers.length; index += 2) {
-        if (!ours.has(headers[index].toLowerCase())) kept.push(headers[index], headers[index + 1]);
-      }
+      for (const watcher of bodyWatchers) watchBody(answered, watcher, report);
 
-      const sent = [...kept, 'Via', '1.1 konggate', ...extra.flat()];
-      if (record) record.answer = { by: 'destination', headers: loggedHeaders(headersFrom(sent), record.redact) };
-
-      res.writeHead(answered.statusCode, answered.statusMessage, sent);
+      res.writeHead(answered.statusCode, answered.statusMessage, answerHeaders.flat());
       answered.pipe(res);
       // An answer that breaks off must not leave the client waiting for the rest.
       answered.once('close', () => {
@@ -590,6 +706,14 @@ export function createGateway({ getWorks, getSecret, log }) {
       // The client itself went away; there is nobody to tell.
       if (res.destroyed) return;
 
+      if (error.code === 'KG_TOO_LARGE') {
+        if (record) record.out.failed = { reason: 'too_large', message: bodyLimit.message };
+        req.unpipe(upstream);
+        req.resume();
+        answer(413, { message: bodyLimit.message, reason: 'too_large' }, [['Connection', 'close']]);
+        return;
+      }
+
       const failure = describeFailure(error, target, connectSeconds, work.timeoutSeconds);
       if (record) record.out.failed = { reason: failure.reason, message: failure.message };
       answer(failure.status, { message: failure.message, reason: failure.reason, destination: target });
@@ -601,13 +725,67 @@ export function createGateway({ getWorks, getSecret, log }) {
       if (!res.writableEnded) upstream.destroy();
     });
 
+    // A body larger than a plugin allows is cut off on its way.
+    if (bodyLimit) {
+      let total = 0;
+      req.on('data', (chunk) => {
+        total += chunk.length;
+        if (total > bodyLimit.maxBytes && !upstream.destroyed) upstream.destroy(timeoutError('KG_TOO_LARGE'));
+      });
+    }
+
+    releaseBody();
     req.pipe(upstream);
   }
 
   return {
-    handle,
+    handle(req, res) {
+      handle(req, res).catch((error) => {
+        report(error);
+        if (res.headersSent) {
+          res.destroy();
+        } else if (!res.destroyed) {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ message: 'the gateway failed on this request', reason: 'gateway' }));
+        }
+      });
+    },
     stop: () => clearInterval(sweep),
   };
+}
+
+// Hands a plugin the destination's whole body once it has gone through to the
+// client, or null when it was larger than the plugin wanted or broke off.
+function watchBody(stream, { callback, maxBytes }, report) {
+  const chunks = [];
+  let held = 0;
+  let tooLarge = false;
+  stream.on('data', (chunk) => {
+    if (tooLarge) return;
+    held += chunk.length;
+    if (held > maxBytes) {
+      tooLarge = true;
+      chunks.length = 0;
+    } else {
+      chunks.push(chunk);
+    }
+  });
+  stream.once('end', () => {
+    try {
+      callback(tooLarge ? null : Buffer.concat(chunks));
+    } catch (error) {
+      report(error);
+    }
+  });
+  stream.once('close', () => {
+    if (!stream.complete) {
+      try {
+        callback(null);
+      } catch (error) {
+        report(error);
+      }
+    }
+  });
 }
 
 // A body as text, unpacked if it travels compressed; null when it cannot be read.
