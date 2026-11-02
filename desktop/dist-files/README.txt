@@ -143,6 +143,7 @@ ishlab turgan KongGate bilan gaplashadi:
     konggate database set --host <address>   where the secrets come from
     konggate database off
     konggate log [--failed]              the latest recorded requests
+    konggate plugins [reload]            the plugins / plaginlar
     konggate serve                       run the gateway without a window
     konggate stop                        stop the running KongGate, freeing its ports
     konggate help                        everything, with the options
@@ -159,6 +160,31 @@ KongGate can run from one data folder; give another with --data <folder>.
 What "serve" seals on disk, the desktop app opens; what the desktop app seals,
 "serve" cannot open (it is tied to the Windows user), so enter the database
 password and local secrets again when moving from one to the other.
+
+
+PLUGINS / PLAGINLAR
+-------------------
+What the gateway does with a work's requests is its list of plugins, on the
+work's "Plaginlar" tab, in the order they run: CORS, IP restriction, size
+limit, JWT, API key, login and password, rate limit, request and answer
+changes, request id, cache. "Plagin qo'shish" adds one; the arrows move it;
+the switch turns it off. Works made with an older KongGate are turned into
+plugins by themselves (the old data file is kept as data.json.before-plugins).
+Ishning so'rovlari bilan nima qilinishi - uning "Plaginlar" bo'limidagi
+plaginlar ro'yxati, ishlash tartibida. "Plagin qo'shish" yangisini qo'shadi;
+strelkalar tartibni o'zgartiradi; tugma o'chirib qo'yadi.
+
+Plugins of your own: put a .mjs file in %APPDATA%\KongGate\plugins and
+press "Qayta yuklash" in Sozlamalar > Plaginlar. README.txt in that folder
+shows how to write one. Only put code there that you trust: a plugin runs
+inside KongGate with all its rights.
+O'z plaginingiz: .mjs faylni %APPDATA%\KongGate\plugins papkasiga qo'ying va
+Sozlamalar > Plaginlar bo'limida "Qayta yuklash"ni bosing. Papkadagi
+README.txt qanday yozishni ko'rsatadi. U yerga faqat ishonchli kodni qo'ying.
+
+A work that uses a plugin this computer does not have answers nothing (500)
+while that plugin is switched on in it. Bu kompyuterda yo'q plaginni
+ishlatadigan ish, plagin yoqilgan ekan, so'rovlarni o'tkazmaydi (500).
 
 
 GOOD TO KNOW / BILIB QO'YING
@@ -194,6 +220,7 @@ GOOD TO KNOW / BILIB QO'YING
     data.json       projects and works (and, without a database, the secrets)
     settings.json   the ports and the database connection
     konggate.log    errors, if any
+    plugins\        your own plugins (.mjs files)
 
 - Not supported yet: WebSocket connections through the gateway.
   Hozircha yo'q: shlyuz orqali WebSocket ulanishlari.

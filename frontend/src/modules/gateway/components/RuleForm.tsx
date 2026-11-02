@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react';
 import { Form, Tabs } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { newRule } from '@/api/works';
-import type { GatewayRule, GatewayRulePayload, Project, TokenField } from '@/types/gateway.types';
-import { ProtectionTab } from './form/ProtectionTab';
+import type { GatewayRule, GatewayRulePayload, JwtConfig, PluginInstance, Project, TokenField } from '@/types/gateway.types';
+import { PluginsTab } from './form/PluginsTab';
 import { RequestTab } from './form/RequestTab';
-import { TokenTab } from './form/TokenTab';
 import { TracingTab } from './form/TracingTab';
 import { RequestPreview } from './RequestPreview';
 import { fieldsOf } from '../utils/token';
@@ -13,23 +12,51 @@ import { fieldsOf } from '../utils/token';
 /** Ties a Save button elsewhere on the page to the form: give it `form={RULE_FORM_ID}`. */
 export const RULE_FORM_ID = 'gateway-rule-form';
 
-type TabKey = 'request' | 'token' | 'tracing' | 'protection';
+type TabKey = 'request' | 'plugins' | 'tracing';
 
 // The tab each top-level form field is on; the rest are on the first.
 const TAB_OF_FIELD: Record<string, TabKey> = {
-  token: 'token',
-  requestId: 'tracing',
+  plugins: 'plugins',
   tracing: 'tracing',
-  rateLimit: 'protection',
-  cors: 'protection',
 };
+
+/** The JWT plugin's settings, text trimmed and half-filled rows dropped. */
+function jwtPayload(config: JwtConfig): JwtConfig {
+  return {
+    header: (config.header ?? '').trim(),
+    claims: (config.claims ?? [])
+      .filter((mapping) => mapping?.claim?.trim() && mapping.header?.trim())
+      .map((mapping) => ({
+        claim: mapping.claim.trim(),
+        header: mapping.header.trim(),
+        required: Boolean(mapping.required),
+      })),
+    payloadHeader: (config.payloadHeader ?? '').trim(),
+    forwardToken: Boolean(config.forwardToken),
+    strict: Boolean(config.strict),
+    conditions: (config.conditions ?? [])
+      .map((condition) => ({
+        claim: condition?.claim?.trim() ?? '',
+        values: (condition?.values ?? []).map((value) => value.trim()).filter(Boolean),
+      }))
+      .filter((condition) => condition.claim && condition.values.length > 0),
+    verify: {
+      enabled: Boolean(config.verify?.enabled),
+      secretId: config.verify?.secretId ?? '',
+      checkExpiry: Boolean(config.verify?.checkExpiry),
+      leeway: config.verify?.leeway ?? 0,
+      issuer: (config.verify?.issuer ?? '').trim(),
+      audience: (config.verify?.audience ?? '').trim(),
+    },
+  };
+}
 
 /**
  * The rule the form's values describe: text trimmed, and rows left half-filled
  * dropped (inside a switched-off section they were never validated).
  */
 function toPayload(values: GatewayRulePayload): GatewayRulePayload {
-  const { token, requestId, tracing, rateLimit, cors } = values;
+  const { tracing } = values;
 
   return {
     name: values.name.trim(),
@@ -38,46 +65,17 @@ function toPayload(values: GatewayRulePayload): GatewayRulePayload {
     destination: values.destination.trim(),
     stripPath: values.stripPath,
     timeoutSeconds: values.timeoutSeconds ?? 30,
-    headers: values.headers
-      .filter((header) => header?.name?.trim() && header.value?.trim())
-      .map((header) => ({ name: header.name.trim(), value: header.value.trim() })),
-    token: {
-      enabled: token.enabled,
-      header: token.header.trim(),
-      claims: token.claims
-        .filter((mapping) => mapping?.claim?.trim() && mapping.header?.trim())
-        .map((mapping) => ({
-          claim: mapping.claim.trim(),
-          header: mapping.header.trim(),
-          required: Boolean(mapping.required),
-        })),
-      payloadHeader: (token.payloadHeader ?? '').trim(),
-      forwardToken: token.forwardToken,
-      strict: token.strict,
-      conditions: token.conditions
-        .map((condition) => ({
-          claim: condition?.claim?.trim() ?? '',
-          values: (condition?.values ?? []).map((value) => value.trim()).filter(Boolean),
-        }))
-        .filter((condition) => condition.claim && condition.values.length > 0),
-      verify: {
-        enabled: token.verify.enabled,
-        secretId: token.verify.secretId ?? '',
-        checkExpiry: token.verify.checkExpiry,
-        leeway: token.verify.leeway ?? 0,
-        issuer: (token.verify.issuer ?? '').trim(),
-        audience: (token.verify.audience ?? '').trim(),
-      },
-    },
-    requestId: { enabled: requestId.enabled, header: requestId.header.trim(), echo: requestId.echo },
     tracing: { enabled: tracing.enabled, samplingPercent: tracing.samplingPercent ?? 100, body: tracing.body },
-    rateLimit: {
-      enabled: rateLimit.enabled,
-      perMinute: rateLimit.perMinute,
-      by: rateLimit.by,
-      header: (rateLimit.header ?? '').trim(),
-    },
-    cors: { enabled: cors.enabled, origins: cors.origins, credentials: cors.credentials },
+    plugins: (values.plugins ?? []).filter(Boolean).map(
+      (plugin): PluginInstance => ({
+        name: plugin.name,
+        enabled: Boolean(plugin.enabled),
+        config:
+          plugin.name === 'jwt'
+            ? (jwtPayload(plugin.config as unknown as JwtConfig) as unknown as Record<string, unknown>)
+            : plugin.config,
+      }),
+    ),
   };
 }
 
@@ -97,11 +95,13 @@ interface RuleFormProps {
   onSubmit: SubmitHandler;
 }
 
-/** A rule's settings on four tabs, beside a preview of what they come to. */
+/** A rule's settings on three tabs, beside a preview of what they come to. */
 export function RuleForm({ rule, project, others, onSubmit }: RuleFormProps) {
   const { t } = useTranslation();
   const [form] = Form.useForm<GatewayRulePayload>();
   const [activeTab, setActiveTab] = useState<TabKey>('request');
+  // A plugin whose settings saving found fault with, to be opened.
+  const [reveal, setReveal] = useState<{ index: number; at: number }>();
   const [initialValues] = useState(() => (rule ? toPayload(rule) : newRule()));
   // The payload of a token pasted into the form, to read the fields off.
   const [sample, setSample] = useState<Record<string, unknown>>();
@@ -127,8 +127,9 @@ export function RuleForm({ rule, project, others, onSubmit }: RuleFormProps) {
       onFinish={() => onSubmit(toPayload({ ...initialValues, ...form.getFieldsValue(true) }), sampleFields)}
       // The first problem may sit on a tab that isn't open.
       onFinishFailed={({ errorFields }) => {
-        const field = String(errorFields[0]?.name[0]);
-        setActiveTab(TAB_OF_FIELD[field] ?? 'request');
+        const [field, index] = errorFields[0]?.name ?? [];
+        setActiveTab(TAB_OF_FIELD[String(field)] ?? 'request');
+        if (field === 'plugins' && typeof index === 'number') setReveal({ index, at: Date.now() });
       }}
     >
       <div className="grid gap-(--c-spacing) @3xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -150,24 +151,23 @@ export function RuleForm({ rule, project, others, onSubmit }: RuleFormProps) {
               ),
             },
             {
-              key: 'token',
-              label: t('gateway.tabToken'),
+              key: 'plugins',
+              label: `${t('plugins.tab')} (${(values.plugins ?? []).length})`,
               forceRender: true,
               children: (
-                <TokenTab fields={sampleFields ?? project.tokenFields} sample={sample} onSample={setSample} />
+                <PluginsTab
+                  tokenFields={sampleFields ?? project.tokenFields}
+                  sample={sample}
+                  onSample={setSample}
+                  reveal={reveal}
+                />
               ),
             },
             {
               key: 'tracing',
-              label: t('gateway.tabTracing'),
+              label: t('gateway.tabLog'),
               forceRender: true,
               children: <TracingTab ruleId={rule?.id} />,
-            },
-            {
-              key: 'protection',
-              label: t('gateway.tabProtection'),
-              forceRender: true,
-              children: <ProtectionTab />,
             },
           ]}
         />

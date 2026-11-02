@@ -1,10 +1,11 @@
-import { AppWindow, Database, HardDrive, KeyRound, Palette, Waypoints } from 'lucide-react';
+import { AppWindow, Database, HardDrive, KeyRound, Palette, Puzzle, Waypoints } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { SettingsSection } from '@/router/routes';
 
 /** The settings' sections, in the order they are listed; each label is a text key. */
 export const SETTINGS_ITEMS: { id: SettingsSection; icon: LucideIcon; label: string }[] = [
   { id: 'gateway', icon: Waypoints, label: 'system.gateway' },
+  { id: 'plugins', icon: Puzzle, label: 'system.plugins' },
   { id: 'appearance', icon: Palette, label: 'system.appearance' },
   { id: 'window', icon: AppWindow, label: 'system.window' },
   { id: 'database', icon: Database, label: 'system.secretsDb' },

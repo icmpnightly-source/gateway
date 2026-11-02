@@ -10,6 +10,7 @@
 // Types: string, number, boolean, select (one of `options`), list (of
 // strings), pairs (name and value rows). Built-in plugins also use keys (API
 // keys, kept as hashes) and users (names and passwords, kept as hashes).
+// `when: { other: value }` shows a field only while another holds that value.
 
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { Refusal } from '../refusal.mjs';
@@ -84,6 +85,10 @@ export function describeFields(fields, { builtIn = false } = {}) {
       described.max = Number.isFinite(field.max) ? field.max : 1_000_000_000;
     }
     if (typeof field.placeholder === 'string') described.placeholder = field.placeholder;
+    // Shown only while other fields hold these values: { by: 'header' }.
+    if (typeof field.when === 'object' && field.when !== null) {
+      described.when = Object.fromEntries(Object.entries(field.when).map(([other, value]) => [other, (Array.isArray(value) ? value : [value]).map(String)]));
+    }
     described.default = defaultOf(described, field.default);
     return described;
   });

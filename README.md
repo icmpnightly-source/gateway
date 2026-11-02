@@ -4,20 +4,28 @@ A gateway with its own UI, as one desktop program: describe each rule as
 "this request comes in → this is what the destination gets", and the program
 itself forwards the requests.
 
-Rules ("works") are grouped into **projects**. A client sends a JWT
-(`Authorization: Bearer …`); per work, the gateway can:
+Rules ("works") are grouped into **projects**. What the gateway does with a
+work's requests is a list of **plugins**, in the order they run, each switched
+on or off and set up on the work's "Plaginlar" tab (see [Plugins](#plugins)).
+The built-in ones can:
 
-- **forward** chosen fields of the token to the destination as headers: paste
-  a sample token, tick the fields to send;
-- **verify** the token against a named secret: signature (HS/RS/ES/PS/EdDSA),
-  expiry, issuer, audience;
-- **gate** the work on field values (e.g. `role` must be `admin`);
-- add a **request id**, and **record** requests in the app's own log: what came
-  in, what left for the destination, what it answered and what the client was
-  given, to filter by outcome, answer code, method or path and sort by code or
-  duration;
-- **rate-limit** per client address or per token user, answer browser **CORS**
-  checks, and always send fixed **extra headers**.
+- read the client's **JWT**: **verify** it against a named secret (signature
+  HS/RS/ES/PS/EdDSA, expiry, issuer, audience), **gate** the work on its
+  fields (e.g. `role` must be `admin`), and **forward** chosen fields to the
+  destination as headers: paste a sample token, tick the fields to send;
+- let clients in with an **API key** or a **user name and password**, or only
+  from some **IP addresses**;
+- **rate-limit** per client address, per header or per caller, refuse bodies
+  over a **size**, and **cache** answers to GET requests;
+- **change the request** (headers and query parameters removed, renamed, set,
+  added) and **the answer** (headers), add a **request id**, and answer
+  browser **CORS** checks.
+
+Plugins of your own go in the plugins folder as `.mjs` files and are added to
+works like the built-in ones. Every work can also **record** its requests in
+the app's own log: what came in, what left for the destination, what it
+answered and what the client was given, to filter by outcome, answer code,
+method or path and sort by code or duration.
 
 Where things are kept:
 
@@ -42,6 +50,7 @@ because only the administrator knows those.
 | Folder | What |
 | --- | --- |
 | [desktop/engine](desktop/engine) | The gateway and the API the screens use. Plain Node.js, no Electron in it; its one package is the PostgreSQL client. |
+| [desktop/engine/plugins](desktop/engine/plugins) | The built-in plugins, one file each, and what loads the plugins folder's. |
 | [desktop/cli.mjs](desktop/cli.mjs) | The command line: talks to a running KongGate, or is one (`serve`). |
 | [desktop/main.mjs](desktop/main.mjs) | The Electron shell: a window, a tray icon, and the engine in the same process. |
 | [frontend](frontend) | The screens (React). Built into static files that the engine serves. |
@@ -149,6 +158,7 @@ konggate password
 konggate port [number] [--local|--public]
 konggate database | database set --host <address> … | database off
 konggate log [--failed] [--limit 20]
+konggate plugins | plugins reload      the plugins, built-in and from the plugins folder
 konggate serve                         the gateway without a window
 konggate stop                          stop the running KongGate; its ports are freed
 ```
@@ -157,6 +167,50 @@ konggate stop                          stop the running KongGate; its ports are 
 without being shown, or read from `KONGGATE_ADMIN_PASSWORD`,
 `KONGGATE_DB_PASSWORD` and `KONGGATE_SECRET_VALUE` for scripts. A running
 KongGate is found through `running.json` in its data folder.
+
+## Plugins
+
+A work's "Plaginlar" tab lists its plugins in the order they run. "Plagin
+qo'shish" adds one where it belongs by default (CORS first, sign-in plugins
+before the limit, the cache last); the arrows move it; the switch turns it off
+without losing its settings. Each plugin is on a work at most once.
+
+| Plugin | What it does |
+| --- | --- |
+| `cors` | Answers browsers' preflights; says which pages may read the answer. |
+| `ip-restriction` | Lets through only the addresses or networks listed, or keeps the ones listed out (403). |
+| `request-size-limit` | Refuses a body over the size set (413), whether or not it says its size. |
+| `jwt` | Reads and checks the token, gates on its fields, forwards fields as headers. |
+| `key-auth` | API keys, in a header or a query parameter; kept as hashes, shown once when made. |
+| `basic-auth` | User names and passwords (HTTP Basic); passwords kept as salted hashes. |
+| `rate-limit` | So many requests a minute per address, per header value, or per caller a sign-in plugin recognised (429). |
+| `request-transformer` | Removes, renames, sets or adds request headers and query parameters. A work's fixed headers from before plugins are its "set" headers. |
+| `response-transformer` | Removes, sets or adds headers of the destination's answer. |
+| `request-id` | An id per request, in a header to the destination and, if asked, back to the client. |
+| `proxy-cache` | Keeps answers to GET for some seconds, in memory, per caller and per the headers listed (`X-Cache-Status: Hit/Miss/Bypass`). Never keeps an answer that sets cookies or says `private` or `no-store`. |
+
+**Plugins of your own** are `.mjs` files in the plugins folder
+(`%APPDATA%\KongGate\plugins`; Sozlamalar > Plaginlar shows it, opens it and
+reads it again). A plugin describes its settings field by field, and the app
+draws its form from them; it has an `access` step (before the request goes
+on: change it, or answer the client itself), a `response` step (change the
+answer), or both. The `README.txt` the app writes into the folder has an
+example and everything a plugin is given; it is in
+[desktop/engine/plugins/readme.mjs](desktop/engine/plugins/readme.mjs) too.
+A plugin runs inside KongGate with all its rights: only put code there that
+you trust.
+
+When a plugin goes wrong the gateway says so rather than going on without it:
+a plugin that throws or takes over 10 seconds makes the answer a 500 (reason
+`plugin`), and a work that uses a plugin this PC does not have answers 500
+(reason `plugin_missing`) while it is switched on, so that a sign-in plugin
+left out cannot let everyone in. A file in the folder that is not a plugin is
+listed in the settings with the reason.
+
+**Works from before plugins** are turned into plugins the first time this
+version opens the data file, in the order things used to run: CORS, the
+token, the limit, the fixed headers (as "set" headers), the request id. The
+file as it was is kept beside it as `data.json.before-plugins`.
 
 ## How it works
 
@@ -183,7 +237,9 @@ own quitting does nothing, which once left the program behind without a window.
 | --- | --- |
 | `data.json` | projects and works; without a database, also the secrets and the administrator's password (as a salted hash) |
 | `settings.json` | the gateway's port, whether other PCs may call it, what closing the window does, the database connection |
-| `konggate.log` | errors |
+| `konggate.log` | errors, a plugin's included |
+| `plugins\` | custom plugins, one `.mjs` file each, with a `README.txt` on writing one |
+| `data.json.before-plugins` | the data file as it was before its works were turned into plugins, kept once |
 
 Local secrets' values and the database password are encrypted for the Windows
 user before they are written.
@@ -196,26 +252,30 @@ reach a gateway carries on with the secrets it last read; if it never read any,
 the works that verify tokens let none through.
 
 **A project as a file.** "Eksport" on a project's page saves the project and
-its works as `<name>.konggate.json`. "Import" on the projects page adds such a
-file as a new project (renamed "name (2)" if the name is taken). A secret is
-named in the file, never carried in it: on import the name is matched with a
-secret that is already there, or becomes one "without a value" for the
-administrator to fill in. The import also says which of the new works answer a
-path that an existing work already answers.
+its works, with their plugins, as `<name>.konggate.json` (format 2). "Import"
+on the projects page adds such a file as a new project (renamed "name (2)" if
+the name is taken); a file from before plugins (format 1) is turned into
+plugins on the way in. A secret is named in the file, never carried in it: on
+import the name is matched with a secret that is already there, or becomes one
+"without a value" for the administrator to fill in. An API key or a password
+of a plugin travels as its hash only. The import also says which of the new
+works answer a path that an existing work already answers, and which plugins
+the works use that this PC does not have.
 
-**A request** goes through a work in this order: CORS preflight → token →
-request limit → fixed headers → request id → forwarding. A work is chosen by
-the longest matching path, compared segment by segment (`/orders` takes
-`/orders` and `/orders/7`, not `/orders2`).
+**A request** goes through a work's plugins in the order the work lists them,
+then to the destination; the destination's answer goes back through them. A
+work is chosen by the longest matching path, compared segment by segment
+(`/orders` takes `/orders` and `/orders/7`, not `/orders2`).
 
 **CORS** is a browser rule: a web page may call another address only if that
-address says it may. With CORS **off** on a work, the gateway says nothing, so a
-browser app on another computer (or another port) is blocked, while Postman,
-curl and servers are not affected; the browser's preflight is passed on to the
-destination untouched, for a destination that handles CORS itself. With CORS
-**on**, the gateway answers the preflight itself, before any token check, for
-the origins listed (or `*`), and lets the page read its own headers
-(`X-Trace-Id`, the request id, `RateLimit-*`).
+address says it may. Without the CORS plugin on a work, the gateway says
+nothing, so a browser app on another computer (or another port) is blocked,
+while Postman, curl and servers are not affected; the browser's preflight is
+passed on to the destination untouched, for a destination that handles CORS
+itself. With it, the gateway answers the preflight itself, before any other
+plugin, for the origins listed (or `*`), and lets the page read its own
+headers (`X-Trace-Id`, the request id, `RateLimit-*`, `X-Cache-Status`). A
+preflight never goes through the other plugins: it carries no token.
 
 **A destination that does not answer** gives the client a 504 or 502 with a
 `reason` saying which of these it was: no connection within 5 seconds, no

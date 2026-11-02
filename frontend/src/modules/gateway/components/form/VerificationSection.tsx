@@ -6,15 +6,14 @@ import { FeatureSection, ToggleRow } from './Section';
 
 const { Text } = Typography;
 
-const FIELD = ['token', 'verify'] as const;
-
 /**
  * Whether a token's signature is checked, and against which secret. Secrets
  * are picked by name: their values are an administrator's to enter and
  * nobody's to see.
  */
-export function VerificationSection() {
+export function VerificationSection({ base }: { base: (string | number)[] }) {
   const { t } = useTranslation();
+  const FIELD = [...base, 'verify'];
   const secrets = useAppSelector((state) => state.secrets.items);
   // Preserved: the fields below aren't rendered while verification is off.
   const verify = Form.useWatch([...FIELD], { preserve: true }) as TokenVerification | undefined;

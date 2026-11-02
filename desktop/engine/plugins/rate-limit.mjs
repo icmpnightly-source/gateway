@@ -17,7 +17,7 @@ export default {
       default: 'ip',
       help: 'ip: client address; header: value of a request header; consumer: who a sign-in plugin before this one recognised.',
     },
-    header: { type: 'string', label: 'Header counted by', default: '', header: true },
+    header: { type: 'string', label: 'Header counted by', default: '', header: true, when: { by: 'header' } },
   },
 
   check(config, { enabled }) {

@@ -3,16 +3,19 @@ import { AutoComplete, Button, Form, Input, Select } from 'antd';
 import { Plus, ScanText, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Hint } from '@/components/Hint';
+import type { NamePath } from 'antd/es/form/interface';
 import type { ClaimMapping, TokenField } from '@/types/gateway.types';
 import { HEADER_PATTERN } from '../../utils/validation';
 import { ClaimChecklist } from './ClaimChecklist';
 import { SampleTokenInput } from './SampleTokenInput';
-import { FeatureSection, Section, ToggleRow } from './Section';
+import { Section, ToggleRow } from './Section';
 import { VerificationSection } from './VerificationSection';
 
 const CONDITION_GRID = 'grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_32px] gap-(--c-spacing-xs)';
 
-interface TokenTabProps {
+interface JwtSettingsProps {
+  /** Where the JWT plugin's settings are in the form: ['plugins', index, 'config']. */
+  base: (string | number)[];
   /** The fields tokens are known to carry: the project's, or a sample's pasted just now. */
   fields: TokenField[];
   /** The payload of that sample, if one was pasted. */
@@ -20,20 +23,20 @@ interface TokenTabProps {
   onSample: (payload: Record<string, unknown>) => void;
 }
 
-/** What the gateway reads from the token, passes on, and insists on. */
-export function TokenTab({ fields, sample, onSample }: TokenTabProps) {
+/** The JWT plugin's settings: what the gateway reads from the token, passes on, and insists on. */
+export function JwtSettings({ base, fields, sample, onSample }: JwtSettingsProps) {
   const { t } = useTranslation();
-  const isOn = Form.useWatch(['token', 'enabled']) as boolean | undefined;
+  const at = (...path: (string | number)[]): NamePath => [...base, ...path];
   // With no fields known yet, a sample is what there is to start from.
   const [isAskingForSample, setIsAskingForSample] = useState(false);
   const showsSampleInput = fields.length === 0 || isAskingForSample;
 
   return (
     <div className="flex flex-col gap-(--c-spacing)">
-      <FeatureSection toggle={['token', 'enabled']} title={t('gateway.token')} hint={t('gateway.tokenHint')}>
+      <Section title={t('gateway.token')} hint={t('gateway.tokenHint')}>
         <div className="flex flex-col gap-(--c-spacing-sm)">
           <Form.Item
-            name={['token', 'header']}
+            name={at('header')}
             label={t('gateway.tokenHeader')}
             tooltip={t('gateway.tokenHeaderHint')}
             className="mb-0!"
@@ -70,7 +73,7 @@ export function TokenTab({ fields, sample, onSample }: TokenTabProps) {
             )}
 
             <Form.Item
-              name={['token', 'claims']}
+              name={at('claims')}
               className="mb-0!"
               rules={[
                 {
@@ -88,7 +91,7 @@ export function TokenTab({ fields, sample, onSample }: TokenTabProps) {
           </div>
 
           <Form.Item
-            name={['token', 'payloadHeader']}
+            name={at('payloadHeader')}
             label={t('gateway.payloadHeader')}
             tooltip={t('gateway.payloadHeaderHint')}
             className="mb-0!"
@@ -98,81 +101,77 @@ export function TokenTab({ fields, sample, onSample }: TokenTabProps) {
           </Form.Item>
 
           <ToggleRow
-            name={['token', 'forwardToken']}
+            name={at('forwardToken')}
             label={t('gateway.forwardToken')}
             hint={t('gateway.forwardTokenHint')}
           />
-          <ToggleRow name={['token', 'strict']} label={t('gateway.strict')} hint={t('gateway.strictHint')} />
+          <ToggleRow name={at('strict')} label={t('gateway.strict')} hint={t('gateway.strictHint')} />
         </div>
-      </FeatureSection>
+      </Section>
 
-      {isOn && (
-        <>
-          <Section title={t('gateway.conditions')} hint={t('gateway.conditionsHint')}>
-            <Form.List name={['token', 'conditions']}>
-              {(rows, { add, remove }) => (
-                <div className="flex flex-col gap-(--c-spacing-xs)">
-                  {rows.length > 0 && (
-                    <div className={`${CONDITION_GRID} text-(length:--c-font-size-sm) text-subtle`}>
-                      <span>{t('gateway.claim')}</span>
-                      <span>{t('gateway.conditionValues')}</span>
-                    </div>
-                  )}
-
-                  {rows.map((row) => (
-                    <div key={row.key} className={`${CONDITION_GRID} items-start`}>
-                      <Form.Item
-                        name={[row.name, 'claim']}
-                        className="mb-0!"
-                        rules={[{ required: true, whitespace: true, message: t('gateway.claimRequired') }]}
-                      >
-                        <AutoComplete
-                          options={fields.map((field) => ({ value: field.path }))}
-                          placeholder="role"
-                          aria-label={t('gateway.claim')}
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name={[row.name, 'values']}
-                        className="mb-0!"
-                        rules={[{ required: true, type: 'array', min: 1, message: t('gateway.conditionValuesRequired') }]}
-                      >
-                        <Select
-                          mode="tags"
-                          // Values are typed, not chosen: nothing to list until then.
-                          notFoundContent={null}
-                          tokenSeparators={[',']}
-                          placeholder="admin, manager"
-                          aria-label={t('gateway.conditionValues')}
-                        />
-                      </Form.Item>
-                      <Button
-                        type="text"
-                        danger
-                        aria-label={t('gateway.remove')}
-                        icon={<Trash2 size={14} />}
-                        onClick={() => remove(row.name)}
-                      />
-                    </div>
-                  ))}
-
-                  <Button
-                    type="dashed"
-                    size="small"
-                    icon={<Plus size={14} />}
-                    onClick={() => add({ claim: '', values: [] })}
-                    className="self-start"
-                  >
-                    {t('gateway.addCondition')}
-                  </Button>
+      <Section title={t('gateway.conditions')} hint={t('gateway.conditionsHint')}>
+        <Form.List name={at('conditions')}>
+          {(rows, { add, remove }) => (
+            <div className="flex flex-col gap-(--c-spacing-xs)">
+              {rows.length > 0 && (
+                <div className={`${CONDITION_GRID} text-(length:--c-font-size-sm) text-subtle`}>
+                  <span>{t('gateway.claim')}</span>
+                  <span>{t('gateway.conditionValues')}</span>
                 </div>
               )}
-            </Form.List>
-          </Section>
 
-          <VerificationSection />
-        </>
-      )}
+              {rows.map((row) => (
+                <div key={row.key} className={`${CONDITION_GRID} items-start`}>
+                  <Form.Item
+                    name={[row.name, 'claim']}
+                    className="mb-0!"
+                    rules={[{ required: true, whitespace: true, message: t('gateway.claimRequired') }]}
+                  >
+                    <AutoComplete
+                      options={fields.map((field) => ({ value: field.path }))}
+                      placeholder="role"
+                      aria-label={t('gateway.claim')}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name={[row.name, 'values']}
+                    className="mb-0!"
+                    rules={[{ required: true, type: 'array', min: 1, message: t('gateway.conditionValuesRequired') }]}
+                  >
+                    <Select
+                      mode="tags"
+                      // Values are typed, not chosen: nothing to list until then.
+                      notFoundContent={null}
+                      tokenSeparators={[',']}
+                      placeholder="admin, manager"
+                      aria-label={t('gateway.conditionValues')}
+                    />
+                  </Form.Item>
+                  <Button
+                    type="text"
+                    danger
+                    aria-label={t('gateway.remove')}
+                    icon={<Trash2 size={14} />}
+                    onClick={() => remove(row.name)}
+                  />
+                </div>
+              ))}
+
+              <Button
+                type="dashed"
+                size="small"
+                icon={<Plus size={14} />}
+                onClick={() => add({ claim: '', values: [] })}
+                className="self-start"
+              >
+                {t('gateway.addCondition')}
+              </Button>
+            </div>
+          )}
+        </Form.List>
+      </Section>
+
+      <VerificationSection base={base} />
     </div>
   );
 }

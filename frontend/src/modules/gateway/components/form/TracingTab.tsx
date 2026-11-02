@@ -1,9 +1,8 @@
 import { Link as RouterLink } from 'react-router-dom';
-import { Form, Input, InputNumber } from 'antd';
+import { Form, InputNumber } from 'antd';
 import { ScrollText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { requestsPath } from '@/router/routes';
-import { HEADER_PATTERN } from '../../utils/validation';
 import { FeatureSection, ToggleRow } from './Section';
 
 interface TracingTabProps {
@@ -11,37 +10,12 @@ interface TracingTabProps {
   ruleId?: string;
 }
 
-/** Ways to follow one request through the gateway and the services behind it. */
+/** The requests log: what each request looked like coming in and going out. */
 export function TracingTab({ ruleId }: TracingTabProps) {
   const { t } = useTranslation();
 
   return (
     <div className="flex flex-col gap-(--c-spacing)">
-      <FeatureSection
-        toggle={['requestId', 'enabled']}
-        title={t('gateway.requestId')}
-        hint={t('gateway.requestIdHint')}
-      >
-        <div className="flex flex-col gap-(--c-spacing-sm)">
-          <Form.Item
-            name={['requestId', 'header']}
-            label={t('gateway.headerName')}
-            className="mb-0!"
-            rules={[
-              { required: true, whitespace: true, message: t('gateway.headerRequired') },
-              { pattern: HEADER_PATTERN, message: t('gateway.headerInvalid') },
-            ]}
-          >
-            <Input placeholder="X-Request-Id" />
-          </Form.Item>
-          <ToggleRow
-            name={['requestId', 'echo']}
-            label={t('gateway.requestIdEcho')}
-            hint={t('gateway.requestIdEchoHint')}
-          />
-        </div>
-      </FeatureSection>
-
       <FeatureSection toggle={['tracing', 'enabled']} title={t('gateway.tracing')} hint={t('gateway.tracingHint')}>
         <div className="flex flex-col gap-(--c-spacing-sm)">
           <Form.Item

@@ -85,7 +85,8 @@
     "importedOpen": "Loyihani ochish",
     "importedClose": "Yopish",
     "export": "Eksport",
-    "exportHint": "JSON faylga saqlash. Secret qiymatlari faylga yozilmaydi"
+    "exportHint": "JSON faylga saqlash. Secret qiymatlari faylga yozilmaydi",
+    "importedPlugins": "Bu plaginlar bu kompyuterda yo'q. Ular qo'shilmaguncha (yoki ishlarda o'chirilmaguncha), ularni ishlatadigan ishlar so'rovlarni o'tkazmaydi:"
   },
   "gateway": {
     "address": "Shlyuz manzili",
@@ -94,9 +95,6 @@
     "editTitle": "Ishni tahrirlash",
     "refresh": "Yangilash",
     "tabRequest": "So'rov",
-    "tabToken": "Token",
-    "tabTracing": "Kuzatuv",
-    "tabProtection": "Himoya",
     "name": "Ish nomi",
     "namePlaceholder": "Masalan: orders-api",
     "nameRequired": "Ish nomini kiriting",
@@ -122,14 +120,8 @@
     "timeout": "Javob kutish vaqti, soniya",
     "timeoutHint": "Manzil shu vaqt ichida javob bermasa, mijozga 504 qaytadi",
     "timeoutRequired": "Son kiriting",
-    "headers": "Qo'shimcha sarlavhalar",
-    "headersHint": "Manzilga har bir so'rov bilan yuboriladi",
-    "headerName": "Sarlavha nomi",
-    "headerValue": "Qiymati",
     "headerRequired": "Sarlavha nomini kiriting",
     "headerInvalid": "Faqat lotin harflari, raqam, - va _",
-    "headerValueRequired": "Qiymatni kiriting",
-    "addHeader": "Sarlavha qo'shish",
     "remove": "Olib tashlash",
     "token": "Token",
     "tokenHint": "So'rovdagi JWT tokenni o'qib, undagi ma'lumotni manzilga uzatish",
@@ -185,10 +177,6 @@
     "issuerHint": "Ixtiyoriy. To'ldirilsa, tokendagi iss shunga teng bo'lishi shart",
     "audience": "Kim uchun (aud)",
     "audienceHint": "Ixtiyoriy. To'ldirilsa, tokendagi aud shuni o'z ichiga olishi shart",
-    "requestId": "So'rov ID",
-    "requestIdHint": "Har bir so'rovga noyob ID berilib, manzilga shu sarlavhada yuboriladi",
-    "requestIdEcho": "ID ni mijozga ham qaytarish",
-    "requestIdEchoHint": "Javobda ham shu sarlavha bo'ladi",
     "tracing": "Jurnalga yozish",
     "tracingHint": "So'rov va javob (manzil, sarlavhalar, kod) jurnalga yoziladi; token va cookie yashiriladi. Jurnalda oxirgi 1000 ta so'rov turadi va ilova yopilganda tozalanadi",
     "tracingSampling": "Yoziladigan ulush",
@@ -197,17 +185,6 @@
     "tracingBody": "Body'ni ham yozish",
     "tracingBodyHint": "So'rov va javob body'sining dastlabki 2000 belgisi. Ichida parol bo'lishi mumkin: ilovani ochgan har kim uni ko'radi",
     "tracingTag": "Jurnal",
-    "rateLimit": "So'rovlar limiti",
-    "rateLimitHint": "Limitdan oshgan so'rovlarga 429 qaytadi",
-    "rateLimitPerMinute": "Daqiqasiga so'rovlar soni",
-    "rateLimitRequired": "Son kiriting",
-    "rateLimitBy": "Nima bo'yicha",
-    "rateLimitByIp": "Mijoz IP manzili",
-    "rateLimitByHeader": "Sarlavha qiymati",
-    "rateLimitHeaderHint": "Tokendan to'ldiriladigan sarlavha (masalan X-User-Id) tanlansa, limit har bir foydalanuvchiga alohida hisoblanadi",
-    "rateLimitTag": "{{n}}/daq",
-    "cors": "CORS",
-    "corsHint": "Boshqa kompyuter yoki saytdagi brauzer ilovasi shu ishga murojaat qila olishi uchun yoqing. O'chiq bo'lsa, brauzer bunday so'rovlarni to'xtatadi; Postman, curl va serverlarga ta'sir qilmaydi",
     "corsOrigins": "Ruxsat etilgan saytlar",
     "corsOriginsHint": "Masalan https://app.example.com. Istalgan sayt uchun *",
     "corsOriginsRequired": "Kamida bitta origin kiriting",
@@ -218,7 +195,6 @@
     "preview": "Natija",
     "clientSends": "Mijoz yuboradi",
     "destinationReceives": "Manzil qabul qiladi",
-    "previewPassThrough": "Token o'qilmaydi",
     "previewVerified": "Imzo: {{name}}",
     "previewNoSecret": "Secret tanlanmagan",
     "previewUnverified": "Imzo tekshirilmaydi",
@@ -232,7 +208,6 @@
     "unverifiedTag": "Tekshirilmaydi",
     "conditionsTag": "{{n}} ta shart",
     "extras": "Qo'shimcha",
-    "headersTag": "{{n}} ta sarlavha",
     "actions": "Amallar",
     "test": "Sinab ko'rish",
     "edit": "Tahrirlash",
@@ -305,7 +280,8 @@
     "copyUrl": "To'liq manzildan nusxa olish",
     "copied": "Nusxa olindi: {{url}}",
     "copyFailed": "Nusxa olib bo'lmadi",
-    "viewSettings": "Sozlamalar"
+    "viewSettings": "Sozlamalar",
+    "tabLog": "Jurnal"
   },
   "secrets": {
     "title": "JWT secretlar",
@@ -483,7 +459,22 @@
       "no_host": "Server manzilini kiriting.",
       "not_connected": "Bazaga hali ulanilmadi."
     },
-    "appearance": "Ko'rinish"
+    "appearance": "Ko'rinish",
+    "plugins": "Plaginlar",
+    "pluginsHint": "Ishlarga qo'shiladigan plaginlar: ichki va o'zingiz yozganlari.",
+    "pluginsFolder": "Plaginlar papkasi",
+    "pluginsFolderHint": "O'z plaginingizni shu papkaga .mjs fayl qilib qo'ying va \"Qayta yuklash\"ni bosing. Papkadagi README.txt qanday yozishni misol bilan tushuntiradi.",
+    "pluginsOpenFolder": "Papkani ochish",
+    "pluginsReload": "Qayta yuklash",
+    "pluginsReloaded": "Papka qayta o'qildi: o'z plaginlaringiz — {{n}} ta",
+    "pluginsReloadFailed": "Papkani o'qib bo'lmadi",
+    "pluginsOpenFailed": "Papkani ochib bo'lmadi",
+    "pluginsUnreadable": "Plaginlar ro'yxatini olib bo'lmadi",
+    "pluginsTrust": "Bu papkaga faqat ishonchli kodni qo'ying: plagin KongGate ichida, ilovaning bu kompyuterdagi barcha huquqlari bilan ishlaydi.",
+    "pluginsNotUsed": "{{file}} ishlatilmadi",
+    "pluginsCustom": "O'z plaginlaringiz ({{n}})",
+    "pluginsNoCustom": "Hozircha yo'q",
+    "pluginsBuiltIn": "Ichki plaginlar ({{n}})"
   },
   "errors": {
     "401": {
@@ -517,5 +508,160 @@
   "roles": {
     "user": "Foydalanuvchi",
     "admin": "Administrator"
+  },
+  "plugins": {
+    "tab": "Plaginlar",
+    "tabIntro": "So'rov plaginlardan shu tartibda o'tadi",
+    "tabIntroHint": "Har bir plagin so'rov bilan nimadir qiladi: tekshiradi, o'zgartiradi yoki o'zi javob beradi. Ular ro'yxatdagi tartibda ishlaydi; ↑ ↓ tugmalari bilan tartibni o'zgartirish mumkin. O'chirilgan plagin hech narsa qilmaydi, sozlamasi esa saqlanib qoladi.",
+    "add": "Plagin qo'shish",
+    "addTitle": "Plagin qo'shish",
+    "none": "Plagin yo'q: so'rov manzilga o'zgarishsiz boradi",
+    "previewNone": "Plaginlar yo'q: so'rov o'zgarishsiz o'tadi",
+    "custom": "o'zingizniki",
+    "missingTag": "o'rnatilmagan",
+    "notInstalled": "\"{{name}}\" plagini bu kompyuterda yo'q. U yoqilgan ekan, bu ish hech bir so'rovni o'tkazmaydi (500). Plaginni plaginlar papkasiga qo'shing yoki bu yerda o'chiring.",
+    "moveUp": "Oldinroq",
+    "moveDown": "Keyinroq",
+    "enabled": "{{name}} yoqilgan",
+    "removeConfirm": "{{name}} plaginini olib tashlaysizmi?",
+    "ownPluginsLink": "O'z plaginingizni qanday qo'shish mumkin",
+    "noSettings": "Bu plaginning sozlamasi yo'q",
+    "fieldRequired": "To'ldiring",
+    "pairName": "Nomi",
+    "pairValue": "Qiymati",
+    "addRow": "Qator qo'shish",
+    "listPlaceholder": "Kiriting va Enter bosing",
+    "keyName": "Kalit nomi",
+    "keyNamePlaceholder": "masalan, mobile-app",
+    "key": "Kalit",
+    "copyKey": "Kalitni nusxalash",
+    "keyCopied": "Kalit nusxalandi",
+    "replaceKey": "Yangisiga almashtirish",
+    "keyShownOnce": "Yangi kalitni hozir nusxalab oling: saqlangandan keyin u boshqa ko'rsatilmaydi (ilova faqat uning xeshini saqlaydi).",
+    "addKey": "Kalit qo'shish",
+    "keyNameRequired": "Har bir kalitga nom bering",
+    "keyNameTwice": "Ikki kalit bir xil nomda",
+    "keyTooShort": "Kalit kamida {{n}} belgidan iborat bo'lsin, bo'sh joysiz",
+    "username": "Foydalanuvchi",
+    "password": "Parol",
+    "passwordSet": "Parol o'rnatilgan",
+    "changePassword": "Parolni o'zgartirish",
+    "addUser": "Foydalanuvchi qo'shish",
+    "usernameRequired": "Har bir foydalanuvchiga nom bering (\":\" belgisisiz)",
+    "usernameTwice": "Ikki foydalanuvchi bir xil nomda",
+    "passwordTooShort": "Parol kamida {{n}} belgidan iborat bo'lsin",
+    "builtIn": {
+      "cors": {
+        "title": "CORS",
+        "description": "Boshqa kompyuter yoki saytdagi brauzer ilovasi shu ishga murojaat qila olishi uchun. Brauzerning oldindan so'rovi (preflight)ga shlyuzning o'zi javob beradi."
+      },
+      "jwt": {
+        "title": "JWT token",
+        "description": "Mijoz tokenini o'qiydi: secret bilan tekshiradi, faqat maydonlari ruxsat bergan tokenlarni o'tkazadi va tanlangan maydonlarni sarlavhalarda manzilga uzatadi."
+      },
+      "rate-limit": {
+        "title": "So'rovlar limiti",
+        "description": "Daqiqasiga ruxsat etilganidan ko'p so'rov yuborgan mijozga 429 qaytaradi.",
+        "fields": {
+          "perMinute": "Daqiqasiga so'rovlar soni",
+          "by": "Nima bo'yicha sanaladi",
+          "byHint": "Mijoz IP manzili, so'rov sarlavhasi qiymati yoki undan oldingi kirish plagini (JWT, API kalit, login va parol) tanigan mijoz bo'yicha.",
+          "header": "Sarlavha"
+        },
+        "options": {
+          "by": {
+            "ip": "Mijoz IP manzili",
+            "header": "Sarlavha qiymati",
+            "consumer": "Tanilgan mijoz"
+          }
+        }
+      },
+      "request-id": {
+        "title": "So'rov ID",
+        "description": "Har bir so'rovga noyob ID beriladi va manzilga sarlavhada yuboriladi. Mijoz yuborgan ID saqlanadi.",
+        "fields": {
+          "header": "Sarlavha nomi",
+          "echo": "ID ni mijozga ham qaytarish"
+        }
+      },
+      "request-transformer": {
+        "title": "So'rovni o'zgartirish",
+        "description": "So'rov manzilga ketishidan oldin sarlavhalar va query parametrlarini olib tashlaydi, nomini o'zgartiradi, o'rnatadi yoki qo'shadi.",
+        "fields": {
+          "removeHeaders": "Olib tashlanadigan sarlavhalar",
+          "renameHeaders": "Nomi o'zgaradigan sarlavhalar",
+          "renameHeadersHint": "Nomi: mijoz yuborgan sarlavha; qiymati: yangi nomi.",
+          "setHeaders": "O'rnatiladigan sarlavhalar",
+          "setHeadersHint": "Mijoz nima yuborganidan qat'i nazar, manzil shu qiymatni oladi.",
+          "addHeaders": "Qo'shiladigan sarlavhalar",
+          "addHeadersHint": "Faqat mijoz bu sarlavhani yubormagan bo'lsa qo'shiladi.",
+          "removeQuery": "Olib tashlanadigan query parametrlari",
+          "setQuery": "O'rnatiladigan query parametrlari"
+        }
+      },
+      "response-transformer": {
+        "title": "Javobni o'zgartirish",
+        "description": "Manzil javobi mijozga qaytishidan oldin uning sarlavhalarini olib tashlaydi, o'rnatadi yoki qo'shadi.",
+        "fields": {
+          "removeHeaders": "Olib tashlanadigan sarlavhalar",
+          "setHeaders": "O'rnatiladigan sarlavhalar",
+          "setHeadersHint": "Javobda doim shu qiymat bo'ladi.",
+          "addHeaders": "Qo'shiladigan sarlavhalar",
+          "addHeadersHint": "Faqat manzil bu sarlavhani yubormagan bo'lsa qo'shiladi."
+        }
+      },
+      "ip-restriction": {
+        "title": "IP cheklov",
+        "description": "Faqat ro'yxatdagi mijoz manzillarini o'tkazadi yoki ro'yxatdagilarni o'tkazmaydi.",
+        "fields": {
+          "allow": "Faqat shularga ruxsat",
+          "allowHint": "Manzillar yoki tarmoqlar, masalan 192.168.1.0/24. Bo'sh bo'lsa: taqiqlanmagan har qanday manzil.",
+          "deny": "Taqiqlangan",
+          "denyHint": "Doim rad etiladigan manzillar yoki tarmoqlar.",
+          "status": "Javob kodi",
+          "message": "Xabar"
+        }
+      },
+      "key-auth": {
+        "title": "API kalit",
+        "description": "Faqat shu ish uchun berilgan API kalitlardan birini yuborgan mijozlarni o'tkazadi.",
+        "fields": {
+          "keys": "Kalitlar",
+          "header": "Kalit yuboriladigan sarlavha",
+          "queryParam": "Yoki query parametri",
+          "queryParamHint": "Masalan apikey: /path?apikey=… Bo'sh bo'lsa, faqat sarlavha.",
+          "hideCredentials": "Kalitni manzilga uzatmaslik",
+          "consumerHeader": "Kalit nomi manzilga shu sarlavhada boradi"
+        }
+      },
+      "basic-auth": {
+        "title": "Login va parol",
+        "description": "Faqat shu yerda berilgan foydalanuvchi nomi va parolini yuborgan mijozlarni o'tkazadi (HTTP Basic).",
+        "fields": {
+          "users": "Foydalanuvchilar",
+          "realm": "Brauzer so'raganda ko'rsatiladigan nom",
+          "hideCredentials": "Parolni manzilga uzatmaslik",
+          "consumerHeader": "Foydalanuvchi nomi manzilga shu sarlavhada boradi"
+        }
+      },
+      "request-size-limit": {
+        "title": "Hajm cheklovi",
+        "description": "Ruxsat etilganidan katta so'rov tanasini rad etadi (413).",
+        "fields": {
+          "maxKilobytes": "Eng katta tana, KB"
+        }
+      },
+      "proxy-cache": {
+        "title": "Kesh",
+        "description": "GET so'rovlariga javoblarni bir necha soniya xotirada saqlaydi va shu vaqt ichida manzilga murojaat qilmay qaytaradi.",
+        "fields": {
+          "ttlSeconds": "Saqlash vaqti, soniya",
+          "statuses": "Saqlanadigan javob kodlari",
+          "varyHeaders": "Ajratib saqlash sarlavhalari",
+          "varyHeadersHint": "Shu sarlavhalardan biri farq qilgan so'rovlar alohida javob oladi.",
+          "maxEntryKilobytes": "Saqlanadigan eng katta javob, KB"
+        }
+      }
+    }
   }
 }
