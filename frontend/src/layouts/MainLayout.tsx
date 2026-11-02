@@ -11,6 +11,7 @@ import { SettingsNav } from '@/modules/system/components/SettingsNav';
 import { ROUTES, WORK_PARAM, projectPath, settingsPath } from '@/router/routes';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { loadRules } from '@/store/slices/gatewaySlice';
+import { loadPlugins } from '@/store/slices/pluginsSlice';
 import { addProject, loadProjects } from '@/store/slices/projectsSlice';
 import { loadSecrets } from '@/store/slices/secretsSlice';
 import { loadStatus } from '@/store/slices/systemSlice';
@@ -77,6 +78,7 @@ export function MainLayout() {
     void dispatch(loadProjects());
     void dispatch(loadRules());
     void dispatch(loadSecrets());
+    void dispatch(loadPlugins());
   }, [dispatch, revision]);
 
   const handleCreateProject = async (name: string) => {

@@ -382,8 +382,11 @@ export function RequestsPage() {
             </Text>
           ) : (
             item.answeredBy === 'gateway' && (
-              <Text type="secondary" className="text-(length:--c-font-size-sm)!">
-                {t('requests.byGateway')}
+              // Why it was turned away, where the gateway said; else only that it was the gateway.
+              <Text type={item.refusal ? 'warning' : 'secondary'} className="text-(length:--c-font-size-sm)!">
+                {item.refusal
+                  ? t(`requests.refusals.${item.refusal}`, { defaultValue: t('requests.byGateway') })
+                  : t('requests.byGateway')}
               </Text>
             )
           )}
@@ -409,7 +412,7 @@ export function RequestsPage() {
             {item.destination}
           </Text>
         ) : (
-          <Text type="secondary">{t('requests.answeredByGateway')}</Text>
+          <Text type="secondary">{t('requests.notSent')}</Text>
         ),
     },
   ];

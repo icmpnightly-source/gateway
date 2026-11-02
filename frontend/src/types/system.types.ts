@@ -95,6 +95,8 @@ export interface RequestSummary {
    * gateway's own (a refusal, or word that the destination did not answer).
    */
   answeredBy: 'destination' | 'gateway' | null;
+  /** Why the gateway turned the request away ("token", "key", "ip", ...), when it did. */
+  refusal: string | null;
 }
 
 /** A message's headers and, where bodies are recorded, the start of its body. */

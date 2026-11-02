@@ -460,6 +460,7 @@ try {
   expect('with the gateway\'s own answer', [r.json.answer.by, JSON.parse(r.json.answer.body).reason], ['gateway', 'token']);
   r = await api('GET', '/requests?limit=5');
   expect('the list is newest first, and says who answered', [r.json[0].id, r.json[0].status, r.json[0].answeredBy, r.json[1].id, r.json[1].answeredBy, r.json[2].id], [refusedId, 401, 'gateway', gzipId, 'destination', traceId]);
+  expect('and why the gateway turned one away', [r.json[0].refusal, r.json[1].refusal], ['token', null]);
 
   console.log('\n# the app\'s own doors');
   r = await call(one.app, 'GET', '/try/plain/from-the-app');

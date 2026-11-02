@@ -4,6 +4,18 @@
 
 const DEFAULT_CAPACITY = 1000;
 
+// Why the gateway turned a request away, as its own answer says ("token",
+// "key", "ip", ...); null for any other answer.
+function refusalOf(entry) {
+  if (entry.answer?.by !== 'gateway' || entry.out.failed || typeof entry.answer.body !== 'string') return null;
+  try {
+    const { reason } = JSON.parse(entry.answer.body);
+    return typeof reason === 'string' ? reason : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createRequestsLog(capacity = DEFAULT_CAPACITY) {
   // Oldest first.
   let entries = [];
@@ -37,6 +49,7 @@ export function createRequestsLog(capacity = DEFAULT_CAPACITY) {
           // "gateway" when the answer was the gateway's own: a refusal, or
           // word that the destination could not be reached.
           answeredBy: entry.answer?.by ?? null,
+          refusal: refusalOf(entry),
         });
       }
       return found;
